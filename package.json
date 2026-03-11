@@ -1,0 +1,33 @@
+{
+  "name": "brmonk",
+  "version": "1.0.0",
+  "description": "AI-powered browser automation agent with multi-LLM support",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "brmonk": "./dist/cli.js"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/cli.js",
+    "clean": "rm -rf dist",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": ["browser", "automation", "ai", "agent", "playwright", "llm"],
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "openai": "^4.77.0",
+    "playwright": "^1.49.0",
+    "chalk": "^5.4.1",
+    "commander": "^13.0.0",
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}
