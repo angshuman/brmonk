@@ -37,7 +37,7 @@ Run tasks directly from the command line without the TUI.
 - **Smart Agent Loop** — Observe-reason-act cycle with automatic CAPTCHA/login detection, popup dismissal, and retry logic.
 - **Document Management** — Import and manage documents (resumes, requirements, wish lists) for AI-powered matching.
 - **Item Tracking** — Track anything found while browsing (jobs, apartments, products, contracts) and match against your documents.
-- **Extensible Skills** — Plugin system for custom automation skills (tracker, documents, smart-browse built in).
+- **Rich Skills System** — YAML-based skill definitions with shell commands, Python/Node scripts, browser automation, LLM analysis, and multi-step workflows. Create custom skills without writing TypeScript.
 - **Session Memory** — All sessions are saved and reviewable. Rolling context summarization prevents token overflow.
 
 ## Architecture
@@ -107,7 +107,12 @@ brmonk run <task>              Run a single automation task
   -v, --verbose                Verbose output
 
 brmonk interactive             Start REPL mode
-brmonk skills list             List available skills
+brmonk skills list             List all skills (built-in + user-defined)
+brmonk skills info <name>      Show detailed skill information
+brmonk skills init <name>      Create a new skill from template
+brmonk skills validate <path>  Validate a skill definition
+brmonk skills install <source> Install a skill from directory or file
+brmonk skills remove <name>    Remove a user-installed skill
 brmonk history list            List past sessions
 brmonk history show <id>       Show session details
 brmonk profile show            Show your profile
@@ -147,13 +152,88 @@ Config file: `~/.brmonk/config.json`
 
 ## Skills
 
-Built-in skills extend the agent's capabilities:
+brmonk has a rich skills system with two types of skills:
 
+### Built-in Skills
+Hardcoded TypeScript skills that ship with brmonk:
 - **tracker** — Track, organize, and match items found while browsing
 - **documents** — Import, parse, and manage user documents for matching context
 - **smart-browse** — Enhanced browsing with content extraction and summarization
+- **web-search**, **data-extract**, **form-fill**, **screenshot**, **navigate**
 
-Custom skills can be added to `~/.brmonk/skills/`.
+### User-Defined Skills (YAML)
+Create custom skills as YAML files in `~/.brmonk/skills/`. Each skill defines:
+- **Instructions** — Markdown guidance injected into the agent's system prompt
+- **Tools** — Named actions the LLM can invoke
+- **Actions** — Multi-step execution pipelines for each tool
+
+#### Action Step Types
+| Type | Description |
+|------|-------------|
+| `shell` | Run a shell command with template interpolation |
+| `script` | Execute a Python, Node.js, or Bash script |
+| `browser` | Perform browser automation actions |
+| `llm` | Make an LLM call for analysis or extraction |
+| `conditional` | Branch execution based on previous output |
+
+#### Quick Start: Create a Skill
+```bash
+# Scaffold a new skill
+brmonk skills init my-skill
+
+# Edit the generated skill.yaml
+vim ~/.brmonk/skills/my-skill/skill.yaml
+
+# Validate it
+brmonk skills validate ~/.brmonk/skills/my-skill
+
+# It's automatically loaded on next run
+brmonk skills list
+```
+
+#### Example: skill.yaml
+```yaml
+name: github-pr
+version: "1.0.0"
+description: "Create and manage GitHub pull requests"
+tags: ["github", "git"]
+
+instructions: |
+  ## GitHub PR Management
+  Use this skill to create and list pull requests.
+  Requires the `gh` CLI to be installed.
+
+tools:
+  - name: listPRs
+    description: "List open pull requests"
+    parameters:
+      type: object
+      properties:
+        status:
+          type: string
+          description: "Filter: open, closed, merged, all"
+
+actions:
+  listPRs:
+    steps:
+      - type: shell
+        command: "gh pr list --state {{status}} --json number,title,url"
+        timeout: 15
+      - type: llm
+        prompt: |
+          Format these PRs into a readable summary:
+          {{previousStepOutput}}
+```
+
+#### Template Variables
+All string fields support `{{variable}}` interpolation:
+- `{{argName}}` — Arguments from the LLM tool call
+- `{{previousStepOutput}}` — Output from the previous step
+- `{{env.VAR_NAME}}` — Environment variables
+- `{{skillDir}}` — Path to the skill directory
+- `{{#if var}}...{{/if}}` — Conditional blocks
+
+See `examples/skills/` for complete working examples.
 
 ## Development
 

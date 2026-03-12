@@ -9,6 +9,7 @@ import { TaskPlanner } from './planner.js';
 import type { AgentState, AgentStep, TaskPlan } from './types.js';
 import type { SkillRegistry } from '../skills/registry.js';
 import type { Skill, SkillContext } from '../skills/types.js';
+import { SkillExecutor } from '../skills/executor.js';
 import type { MemoryStore } from '../memory/store.js';
 import type { AgentEventBus } from '../events.js';
 import { withRetry } from '../utils/retry.js';
@@ -90,6 +91,7 @@ export class AgentLoop {
   private actionExecutor: ActionExecutor;
   private planner: TaskPlanner;
   private skillRegistry: SkillRegistry | null;
+  private skillExecutor: SkillExecutor | null;
   private memory: MemoryStore | null;
   private eventBus: AgentEventBus | null;
   private state: AgentState;
@@ -112,6 +114,9 @@ export class AgentLoop {
     this.actionExecutor = new ActionExecutor(options.browser);
     this.planner = new TaskPlanner(options.llm);
     this.skillRegistry = options.skillRegistry ?? null;
+    this.skillExecutor = options.skillRegistry
+      ? new SkillExecutor(options.browser, options.llm, this.actionExecutor)
+      : null;
     this.memory = options.memory ?? null;
     this.eventBus = options.eventBus ?? null;
     this.state = {
@@ -259,14 +264,21 @@ export class AgentLoop {
       }
     }
 
-    // Add skill system prompts
+    // Add skill system prompts and tools (built-in + rich)
     const skillTools: LLMToolDefinition[] = [];
     if (this.skillRegistry) {
+      // Built-in skills
       for (const skill of this.skillRegistry.listSkills()) {
         if (skill.systemPrompt) {
           systemPrompt += `\n\n## Skill: ${skill.name}\n${skill.systemPrompt}`;
         }
         skillTools.push(...skill.tools);
+      }
+
+      // Rich YAML-based skills
+      for (const richSkill of this.skillRegistry.listRichSkills()) {
+        systemPrompt += `\n\n## Skill: ${richSkill.manifest.name}\n${richSkill.manifest.instructions}`;
+        skillTools.push(...richSkill.manifest.tools);
       }
     }
 
@@ -432,25 +444,39 @@ export class AgentLoop {
 
         let result: string;
 
-        // Check if it's a skill tool
-        const skillHandler = this.findSkillForTool(toolCall.name);
-        if (skillHandler) {
+        // Check rich skills first, then built-in skills, then browser actions
+        const richSkillHandler = this.skillRegistry?.findRichSkillForTool(toolCall.name);
+        if (richSkillHandler && this.skillExecutor) {
           try {
-            const skillContext: SkillContext = {
-              agent: this,
-              browser: this.browser,
-              llm: this.llm,
-              memory: this.memory as MemoryStore,
-            };
-            result = await skillHandler.execute(toolCall.name, toolCall.arguments as Record<string, unknown>, skillContext);
+            result = await this.skillExecutor.executeAction(
+              richSkillHandler,
+              toolCall.name,
+              toolCall.arguments as Record<string, unknown>,
+            );
           } catch (err) {
-            result = `Skill error: ${err instanceof Error ? err.message : String(err)}`;
+            result = `Rich skill error: ${err instanceof Error ? err.message : String(err)}`;
           }
         } else {
-          // Browser action
-          const actionResult = await this.actionExecutor.execute(toolCall.name, toolCall.arguments as Record<string, unknown>);
-          result = actionResult.message;
-          logger.action(`${toolCall.name}: ${result}`);
+          // Check built-in skill tools
+          const skillHandler = this.findSkillForTool(toolCall.name);
+          if (skillHandler) {
+            try {
+              const skillContext: SkillContext = {
+                agent: this,
+                browser: this.browser,
+                llm: this.llm,
+                memory: this.memory as MemoryStore,
+              };
+              result = await skillHandler.execute(toolCall.name, toolCall.arguments as Record<string, unknown>, skillContext);
+            } catch (err) {
+              result = `Skill error: ${err instanceof Error ? err.message : String(err)}`;
+            }
+          } else {
+            // Browser action
+            const actionResult = await this.actionExecutor.execute(toolCall.name, toolCall.arguments as Record<string, unknown>);
+            result = actionResult.message;
+            logger.action(`${toolCall.name}: ${result}`);
+          }
         }
 
         this.eventBus?.emitActionResult(toolCall.name, result);

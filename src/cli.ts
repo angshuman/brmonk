@@ -223,13 +223,22 @@ Or type any task to execute it.
                 logger.info('Conversation cleared');
                 break;
 
-              case '/skills':
-                console.log('\nAvailable skills:');
+              case '/skills': {
+                console.log('\nBuilt-in skills:');
                 for (const skill of skillRegistry.listSkills()) {
                   console.log(`  ${skill.name} (v${skill.version}) - ${skill.description}`);
                 }
+                const richList = skillRegistry.listRichSkills();
+                if (richList.length > 0) {
+                  console.log('\nUser-defined skills:');
+                  for (const skill of richList) {
+                    const tags = skill.manifest.tags?.length ? ` [${skill.manifest.tags.join(', ')}]` : '';
+                    console.log(`  ${skill.manifest.name} (v${skill.manifest.version})${tags} - ${skill.manifest.description}`);
+                  }
+                }
                 console.log('');
                 break;
+              }
 
               case '/screenshot': {
                 try {
@@ -297,25 +306,316 @@ const skillsCmd = program
 
 skillsCmd
   .command('list')
-  .description('List available skills')
+  .description('List all available skills (built-in and user-defined)')
   .action(async () => {
     try {
       const config = await loadConfig();
       const registry = new SkillRegistry();
       await registry.loadFromDirectory(config.skillsDir);
 
-      console.log('\nAvailable skills:');
-      for (const skill of registry.listSkills()) {
-        console.log(`  ${skill.name} (v${skill.version})`);
-        console.log(`    ${skill.description}`);
-        console.log(`    Tools: ${skill.tools.map(t => t.name).join(', ')}`);
+      const counts = registry.getSkillCount();
+
+      console.log(`\nSkills (${counts.total} total):\n`);
+
+      // Built-in skills
+      if (counts.builtin > 0) {
+        console.log(`  Built-in (${counts.builtin}):`);
+        for (const skill of registry.listSkills()) {
+          console.log(`    ${skill.name} (v${skill.version})`);
+          console.log(`      ${skill.description}`);
+          console.log(`      Tools: ${skill.tools.map(t => t.name).join(', ')}`);
+        }
       }
+
+      // Rich (YAML) skills
+      if (counts.rich > 0) {
+        console.log(`\n  User-defined (${counts.rich}):`);
+        for (const skill of registry.listRichSkills()) {
+          const tags = skill.manifest.tags?.length ? ` [${skill.manifest.tags.join(', ')}]` : '';
+          console.log(`    ${skill.manifest.name} (v${skill.manifest.version})${tags}`);
+          console.log(`      ${skill.manifest.description}`);
+          console.log(`      Tools: ${skill.manifest.tools.map(t => t.name).join(', ')}`);
+          if (skill.manifest.author) console.log(`      Author: ${skill.manifest.author}`);
+        }
+      }
+
+      console.log(`\n  Skills directory: ${config.skillsDir}`);
       console.log('');
     } catch (err) {
       logger.error(err instanceof Error ? err.message : String(err));
       process.exitCode = 1;
     }
   });
+
+skillsCmd
+  .command('info')
+  .description('Show detailed information about a skill')
+  .argument('<name>', 'Skill name')
+  .action(async (name: string) => {
+    try {
+      const config = await loadConfig();
+      const registry = new SkillRegistry();
+      await registry.loadFromDirectory(config.skillsDir);
+
+      // Check built-in skills
+      const builtin = registry.getSkill(name);
+      if (builtin) {
+        console.log(`\nSkill: ${builtin.name} (v${builtin.version})`);
+        console.log(`Type: built-in`);
+        console.log(`Description: ${builtin.description}`);
+        console.log(`\nTools:`);
+        for (const tool of builtin.tools) {
+          console.log(`  ${tool.name}: ${tool.description}`);
+        }
+        if (builtin.systemPrompt) {
+          console.log(`\nSystem Prompt:\n${builtin.systemPrompt}`);
+        }
+        console.log('');
+        return;
+      }
+
+      // Check rich skills
+      const rich = registry.getRichSkill(name);
+      if (rich) {
+        const m = rich.manifest;
+        console.log(`\nSkill: ${m.name} (v${m.version})`);
+        console.log(`Type: user-defined (YAML)`);
+        console.log(`Description: ${m.description}`);
+        if (m.author) console.log(`Author: ${m.author}`);
+        if (m.tags?.length) console.log(`Tags: ${m.tags.join(', ')}`);
+        console.log(`Directory: ${rich.skillDir}`);
+
+        console.log(`\nTools:`);
+        for (const tool of m.tools) {
+          console.log(`  ${tool.name}: ${tool.description}`);
+          const action = m.actions[tool.name];
+          if (action) {
+            console.log(`    Steps: ${action.steps.map(s => s.type).join(' → ')}`);
+          }
+        }
+
+        if (m.env?.required?.length) {
+          console.log(`\nRequired environment variables: ${m.env.required.join(', ')}`);
+        }
+        if (m.env?.optional?.length) {
+          console.log(`Optional environment variables: ${m.env.optional.join(', ')}`);
+        }
+
+        console.log(`\nInstructions:\n${m.instructions}`);
+        console.log('');
+        return;
+      }
+
+      logger.error(`Skill "${name}" not found`);
+      process.exitCode = 1;
+    } catch (err) {
+      logger.error(err instanceof Error ? err.message : String(err));
+      process.exitCode = 1;
+    }
+  });
+
+skillsCmd
+  .command('init')
+  .description('Create a new skill from a template')
+  .argument('<name>', 'Skill name (kebab-case)')
+  .action(async (name: string) => {
+    try {
+      if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/.test(name)) {
+        logger.error('Skill name must be kebab-case (lowercase letters, numbers, hyphens)');
+        process.exitCode = 1;
+        return;
+      }
+
+      const config = await loadConfig();
+      const skillDir = path.join(config.skillsDir, name);
+
+      try {
+        await fs.access(skillDir);
+        logger.error(`Skill directory already exists: ${skillDir}`);
+        process.exitCode = 1;
+        return;
+      } catch {
+        // Good — doesn't exist
+      }
+
+      await fs.mkdir(skillDir, { recursive: true });
+      await fs.mkdir(path.join(skillDir, 'scripts'), { recursive: true });
+
+      const yamlContent = `name: ${name}
+version: "1.0.0"
+description: "TODO: Describe what this skill does"
+author: ""
+tags: []
+
+instructions: |
+  ## ${name}
+  TODO: Write instructions that tell the AI when and how to use this skill.
+  Include prerequisites, workflow steps, and any important context.
+
+tools:
+  - name: exampleTool
+    description: "TODO: Describe what this tool does"
+    parameters:
+      type: object
+      properties:
+        input:
+          type: string
+          description: "Example input parameter"
+      required: ["input"]
+
+actions:
+  exampleTool:
+    steps:
+      - type: shell
+        command: "echo \\"Processing: {{input}}\\""
+        timeout: 30
+        captureOutput: true
+
+env:
+  required: []
+  optional: []
+`;
+
+      await fs.writeFile(path.join(skillDir, 'skill.yaml'), yamlContent, 'utf-8');
+
+      const readmeContent = `# ${name}
+
+TODO: Document your skill here.
+
+## Installation
+
+\`\`\`bash
+cp -r ./${name} ~/.brmonk/skills/
+\`\`\`
+
+## Usage
+
+This skill provides the following tools:
+
+- \`exampleTool\`: TODO describe
+`;
+
+      await fs.writeFile(path.join(skillDir, 'README.md'), readmeContent, 'utf-8');
+
+      logger.success(`Created skill scaffold at ${skillDir}`);
+      console.log(`\nEdit ${path.join(skillDir, 'skill.yaml')} to configure your skill.`);
+      console.log('Add scripts to the scripts/ directory as needed.');
+      console.log(`Use \`brmonk skills validate ${skillDir}\` to check your skill.\n`);
+    } catch (err) {
+      logger.error(err instanceof Error ? err.message : String(err));
+      process.exitCode = 1;
+    }
+  });
+
+skillsCmd
+  .command('validate')
+  .description('Validate a skill definition file')
+  .argument('<path>', 'Path to skill.yaml or skill directory')
+  .action(async (skillPath: string) => {
+    try {
+      const { loadRichSkill } = await import('./skills/loader.js');
+      const resolvedPath = path.resolve(skillPath);
+      const skill = await loadRichSkill(resolvedPath);
+
+      console.log(`\nSkill "${skill.manifest.name}" is valid!`);
+      console.log(`  Version: ${skill.manifest.version}`);
+      console.log(`  Description: ${skill.manifest.description}`);
+      console.log(`  Tools: ${skill.manifest.tools.map(t => t.name).join(', ')}`);
+      console.log(`  Actions: ${Object.keys(skill.manifest.actions).join(', ')}`);
+      const stepTypes = new Set<string>();
+      for (const action of Object.values(skill.manifest.actions)) {
+        for (const step of action.steps) {
+          stepTypes.add(step.type);
+        }
+      }
+      console.log(`  Step types used: ${Array.from(stepTypes).join(', ')}`);
+      console.log('');
+    } catch (err) {
+      logger.error(`Validation failed: ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 1;
+    }
+  });
+
+skillsCmd
+  .command('install')
+  .description('Install a skill from a directory or YAML file')
+  .argument('<source>', 'Path to skill directory or .yaml file')
+  .action(async (source: string) => {
+    try {
+      const { loadRichSkill } = await import('./skills/loader.js');
+      const resolvedSource = path.resolve(source);
+
+      // Validate first
+      const skill = await loadRichSkill(resolvedSource);
+      const config = await loadConfig();
+
+      const targetDir = path.join(config.skillsDir, skill.manifest.name);
+      await fs.mkdir(config.skillsDir, { recursive: true });
+
+      const stat = await fs.stat(resolvedSource);
+      if (stat.isDirectory()) {
+        // Copy entire directory
+        await copyDir(resolvedSource, targetDir);
+      } else {
+        // Single file — create a directory for it
+        await fs.mkdir(targetDir, { recursive: true });
+        await fs.copyFile(resolvedSource, path.join(targetDir, 'skill.yaml'));
+      }
+
+      logger.success(`Installed skill "${skill.manifest.name}" to ${targetDir}`);
+    } catch (err) {
+      logger.error(err instanceof Error ? err.message : String(err));
+      process.exitCode = 1;
+    }
+  });
+
+skillsCmd
+  .command('remove')
+  .description('Remove a user-installed skill')
+  .argument('<name>', 'Skill name')
+  .action(async (name: string) => {
+    try {
+      const config = await loadConfig();
+      const skillDir = path.join(config.skillsDir, name);
+
+      try {
+        await fs.access(skillDir);
+      } catch {
+        // Also check for single .yaml file
+        const yamlPath = path.join(config.skillsDir, `${name}.yaml`);
+        try {
+          await fs.access(yamlPath);
+          await fs.unlink(yamlPath);
+          logger.success(`Removed skill "${name}"`);
+          return;
+        } catch {
+          logger.error(`Skill "${name}" not found in ${config.skillsDir}`);
+          process.exitCode = 1;
+          return;
+        }
+      }
+
+      await fs.rm(skillDir, { recursive: true });
+      logger.success(`Removed skill "${name}"`);
+    } catch (err) {
+      logger.error(err instanceof Error ? err.message : String(err));
+      process.exitCode = 1;
+    }
+  });
+
+async function copyDir(src: string, dest: string): Promise<void> {
+  await fs.mkdir(dest, { recursive: true });
+  const entries = await fs.readdir(src, { withFileTypes: true });
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+    if (entry.isDirectory()) {
+      await copyDir(srcPath, destPath);
+    } else {
+      await fs.copyFile(srcPath, destPath);
+    }
+  }
+}
 
 const historyCmd = program
   .command('history')

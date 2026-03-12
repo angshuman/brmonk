@@ -1,0 +1,53 @@
+name: api-tester
+version: "1.0.0"
+description: "Test REST APIs with structured requests and response analysis"
+author: "brmonk"
+tags: ["api", "testing", "http"]
+
+instructions: |
+  ## API Testing
+  Use this skill to test REST API endpoints. You can send HTTP requests
+  and get structured analysis of the responses.
+  
+  ### Usage
+  - Use `apiRequest` to send a request to any URL
+  - Supports GET, POST, PUT, DELETE, PATCH methods
+  - Headers and body can be passed as JSON strings
+  - The response is automatically analyzed by the LLM
+
+tools:
+  - name: apiRequest
+    description: "Send an HTTP request to an API endpoint and analyze the response"
+    parameters:
+      type: object
+      properties:
+        method:
+          type: string
+          description: "HTTP method (GET, POST, PUT, DELETE, PATCH)"
+        url:
+          type: string
+          description: "Full URL of the API endpoint"
+        headers:
+          type: string
+          description: "Request headers as a JSON string, e.g. '{\"Authorization\": \"Bearer token\"}'"
+        body:
+          type: string
+          description: "Request body (JSON string for POST/PUT/PATCH)"
+      required: ["url"]
+
+actions:
+  apiRequest:
+    steps:
+      - type: script
+        file: scripts/request.mjs
+        args: ["{{method}}", "{{url}}", "{{headers}}", "{{body}}"]
+        timeout: 30
+        captureOutput: true
+      - type: llm
+        prompt: |
+          Analyze this API response and provide a summary:
+          {{previousStepOutput}}
+          
+          Include: HTTP status, response time impression, key data points from the body,
+          and any errors or unusual aspects.
+        captureOutput: true

@@ -1,0 +1,92 @@
+name: github-pr
+version: "1.0.0"
+description: "Create and manage GitHub pull requests using the gh CLI"
+author: "brmonk"
+tags: ["github", "git", "development"]
+
+instructions: |
+  ## GitHub PR Management
+  Use this skill to create pull requests, check PR status, and list PRs.
+  Requires the `gh` CLI to be installed and authenticated (`gh auth login`).
+
+  ### Workflow
+  1. Use `listPRs` to see open pull requests
+  2. Use `createPR` to create a new pull request from the current branch
+  3. Use `checkPR` to see the status and checks for a specific PR
+
+tools:
+  - name: createPR
+    description: "Create a new pull request from the current branch"
+    parameters:
+      type: object
+      properties:
+        title:
+          type: string
+          description: "PR title"
+        body:
+          type: string
+          description: "PR description (markdown)"
+        base:
+          type: string
+          description: "Base branch (default: main)"
+      required: ["title"]
+
+  - name: listPRs
+    description: "List pull requests with optional status filter"
+    parameters:
+      type: object
+      properties:
+        status:
+          type: string
+          description: "PR status filter: open, closed, merged, all"
+
+  - name: checkPR
+    description: "Check the status and CI checks of a specific pull request"
+    parameters:
+      type: object
+      properties:
+        number:
+          type: number
+          description: "PR number"
+      required: ["number"]
+
+actions:
+  createPR:
+    steps:
+      - type: shell
+        command: |
+          gh pr create \
+            --title "{{title}}" \
+            --body "{{body}}" \
+            --base "{{#if base}}{{base}}{{else}}main{{/if}}" 2>&1
+        timeout: 30
+        captureOutput: true
+
+  listPRs:
+    steps:
+      - type: shell
+        command: "gh pr list --state {{#if status}}{{status}}{{else}}open{{/if}} --json number,title,author,url,state,createdAt 2>&1"
+        timeout: 15
+        captureOutput: true
+      - type: llm
+        prompt: |
+          Format these GitHub PRs into a readable summary table.
+          If the data is empty or an error, say so clearly.
+          
+          Raw data:
+          {{previousStepOutput}}
+        captureOutput: true
+
+  checkPR:
+    steps:
+      - type: shell
+        command: "gh pr view {{number}} --json title,state,author,body,reviews,statusCheckRollup,url 2>&1"
+        timeout: 15
+        captureOutput: true
+      - type: llm
+        prompt: |
+          Summarize this pull request status:
+          {{previousStepOutput}}
+          
+          Include: title, state, author, review status, CI check results, and URL.
+        captureOutput: true

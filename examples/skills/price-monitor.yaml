@@ -1,0 +1,57 @@
+name: price-monitor
+version: "1.0.0"
+description: "Monitor product prices on websites by navigating and extracting pricing data"
+author: "brmonk"
+tags: ["shopping", "monitoring", "price"]
+
+instructions: |
+  ## Price Monitor
+  Use this skill to check current prices of products on websites.
+  The agent will navigate to the product page, extract the content,
+  and use LLM analysis to identify pricing information.
+  
+  ### Usage
+  - Use `checkPrice` with a product URL to get current pricing
+  - Works with most e-commerce sites (Amazon, Best Buy, etc.)
+  - Returns structured pricing data including product name, price, and availability
+
+tools:
+  - name: checkPrice
+    description: "Check the current price of a product at a given URL"
+    parameters:
+      type: object
+      properties:
+        url:
+          type: string
+          description: "URL of the product page"
+      required: ["url"]
+
+actions:
+  checkPrice:
+    steps:
+      - type: browser
+        actions:
+          - goTo: { url: "{{url}}" }
+          - waitForLoad: {}
+          - getPageContent: {}
+        captureOutput: true
+      - type: llm
+        prompt: |
+          Extract pricing information from this product page content.
+          Return ONLY valid JSON with this structure:
+          {
+            "product": "Product name",
+            "price": "$XX.XX",
+            "currency": "USD",
+            "originalPrice": "$XX.XX or null if no discount",
+            "discount": "XX% or null",
+            "inStock": true/false,
+            "seller": "Store/seller name",
+            "url": "{{url}}"
+          }
+          
+          Page content:
+          {{previousStepOutput}}
+        temperature: 0.1
+        maxTokens: 512
+        captureOutput: true
