@@ -107,8 +107,8 @@ export type { AgentState, AgentStep, TaskPlan, PlanStep } from './agent/types.js
 export type { Skill, SkillContext } from './skills/types.js';
 export type { AgentEvent } from './events.js';
 export type {
-  UserProfile, WorkExperience, Education,
-  JobListing, JobFilter, JobMatch, MemoryEntry,
+  UserProfile, TrackedItem, TrackedItemFilter, TrackedItemMatch,
+  UserDocument, MemoryEntry,
   SessionRecord, MemoryFact, CachedResult, SessionSummary,
 } from './memory/types.js';
 export { BrowserEngine } from './browser/engine.js';

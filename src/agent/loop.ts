@@ -248,10 +248,10 @@ export class AgentLoop {
           if (profile.email) systemPrompt += `Email: ${profile.email}\n`;
           if (profile.location) systemPrompt += `Location: ${profile.location}\n`;
           if (profile.summary) systemPrompt += `Summary: ${profile.summary}\n`;
-          if (profile.skills.length > 0) systemPrompt += `Skills: ${profile.skills.join(', ')}\n`;
-          if (profile.experience.length > 0) {
-            const latest = profile.experience[0];
-            if (latest) systemPrompt += `Current role: ${latest.title} at ${latest.company}\n`;
+          if (profile.attributes && Object.keys(profile.attributes).length > 0) {
+            for (const [key, value] of Object.entries(profile.attributes)) {
+              systemPrompt += `${key}: ${JSON.stringify(value)}\n`;
+            }
           }
         }
       } catch {

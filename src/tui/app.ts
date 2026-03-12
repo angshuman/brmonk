@@ -75,12 +75,14 @@ export class TUIApp {
     try {
       const profile = await this.memory.getProfile();
       if (profile && profile.name) {
-        const jobs = await this.memory.getJobs();
+        const items = await this.memory.getItems();
+        const documents = await this.memory.getDocuments();
+        const collections = await this.memory.getCollections();
         this.state.profile = {
           name: profile.name,
-          skills: profile.skills.length,
-          experience: profile.experience.length,
-          jobCount: jobs.length,
+          documentCount: documents.length,
+          itemCount: items.length,
+          collections,
         };
       }
     } catch {

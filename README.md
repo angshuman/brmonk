@@ -35,9 +35,9 @@ Run tasks directly from the command line without the TUI.
 - **TUI Dashboard** — Real-time terminal UI showing agent progress, plans, logs, and session history.
 - **Persistent Browser Context** — Cookies and localStorage survive across sessions. Log in once, stay logged in.
 - **Smart Agent Loop** — Observe-reason-act cycle with automatic CAPTCHA/login detection, popup dismissal, and retry logic.
-- **Profile & Resume Management** — Store your profile, import resumes, and use them for automated job searching.
-- **Job Tracking & Matching** — Track jobs found during browsing, match them against your skills profile.
-- **Extensible Skills** — Plugin system for custom automation skills (job-search, resume-analyzer, smart-browse built in).
+- **Document Management** — Import and manage documents (resumes, requirements, wish lists) for AI-powered matching.
+- **Item Tracking** — Track anything found while browsing (jobs, apartments, products, contracts) and match against your documents.
+- **Extensible Skills** — Plugin system for custom automation skills (tracker, documents, smart-browse built in).
 - **Session Memory** — All sessions are saved and reviewable. Rolling context summarization prevents token overflow.
 
 ## Architecture
@@ -112,9 +112,13 @@ brmonk history list            List past sessions
 brmonk history show <id>       Show session details
 brmonk profile show            Show your profile
 brmonk profile set             Set profile interactively
-brmonk profile import <file>   Import resume from text file
-brmonk jobs list               List tracked jobs
-brmonk jobs match              Match jobs against your profile
+brmonk profile import <file>   Import a document (shortcut for docs import --type resume)
+brmonk items list              List tracked items
+brmonk items collections       List collections and counts
+brmonk docs list               List stored documents
+brmonk docs show <id>          Show document content
+brmonk docs import <file>      Import a document
+brmonk docs delete <id>        Delete a document
 brmonk config set <key> <val>  Set a config value
 brmonk config show             Show current config
 ```
@@ -145,8 +149,8 @@ Config file: `~/.brmonk/config.json`
 
 Built-in skills extend the agent's capabilities:
 
-- **job-search** — Search job boards, extract listings, save to tracker
-- **resume-analyzer** — Parse resumes, extract skills/experience, match against jobs
+- **tracker** — Track, organize, and match items found while browsing
+- **documents** — Import, parse, and manage user documents for matching context
 - **smart-browse** — Enhanced browsing with content extraction and summarization
 
 Custom skills can be added to `~/.brmonk/skills/`.

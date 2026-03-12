@@ -55,8 +55,10 @@ export function renderDashboard(renderer: Renderer, state: AppState): void {
   if (state.profile) {
     content.push(chalk.gray('  ─'.repeat(20)));
     content.push(`  ${chalk.bold('Profile')}: ${state.profile.name}`);
-    content.push(`  ${chalk.gray('Skills')}: ${state.profile.skills} · ${chalk.gray('Exp')}: ${state.profile.experience} positions`);
-    content.push(`  ${chalk.gray('Jobs tracked')}: ${state.profile.jobCount}`);
+    content.push(`  ${chalk.gray('Documents')}: ${state.profile.documentCount} · ${chalk.gray('Items tracked')}: ${state.profile.itemCount}`);
+    if (state.profile.collections.length > 0) {
+      content.push(`  ${chalk.gray('Collections')}: ${state.profile.collections.join(', ')}`);
+    }
     content.push('');
   }
 

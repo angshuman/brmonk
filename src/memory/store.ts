@@ -4,7 +4,7 @@ import * as crypto from 'node:crypto';
 import type { AgentStep } from '../agent/types.js';
 import type {
   SessionRecord, MemoryFact, CachedResult, SessionSummary,
-  UserProfile, JobListing, JobFilter, JobMatch, MemoryEntry,
+  UserProfile, TrackedItem, TrackedItemFilter, UserDocument, MemoryEntry,
 } from './types.js';
 
 export class MemoryStore {
@@ -12,27 +12,28 @@ export class MemoryStore {
   private sessionsDir: string;
   private factsDir: string;
   private cacheDir: string;
-  private jobsDir: string;
+  private itemsDir: string;
+  private documentsDir: string;
   private authDir: string;
   private profileFile: string;
-  private resumeFile: string;
 
   constructor(dir: string) {
     this.dir = dir;
     this.sessionsDir = path.join(dir, 'sessions');
     this.factsDir = path.join(dir, 'memory');
     this.cacheDir = path.join(dir, 'cache');
-    this.jobsDir = path.join(dir, 'jobs');
+    this.itemsDir = path.join(dir, 'items');
+    this.documentsDir = path.join(dir, 'documents');
     this.authDir = path.join(dir, 'auth');
     this.profileFile = path.join(dir, 'profile.json');
-    this.resumeFile = path.join(dir, 'resume.txt');
   }
 
   private async ensureDirs(): Promise<void> {
     await fs.mkdir(this.sessionsDir, { recursive: true });
     await fs.mkdir(this.factsDir, { recursive: true });
     await fs.mkdir(this.cacheDir, { recursive: true });
-    await fs.mkdir(this.jobsDir, { recursive: true });
+    await fs.mkdir(this.itemsDir, { recursive: true });
+    await fs.mkdir(this.documentsDir, { recursive: true });
     await fs.mkdir(this.authDir, { recursive: true });
   }
 
@@ -47,11 +48,7 @@ export class MemoryStore {
       phone: profile.phone ?? existing?.phone,
       location: profile.location ?? existing?.location,
       summary: profile.summary ?? existing?.summary,
-      skills: profile.skills ?? existing?.skills ?? [],
-      experience: profile.experience ?? existing?.experience ?? [],
-      education: profile.education ?? existing?.education ?? [],
-      preferences: { ...(existing?.preferences ?? {}), ...(profile.preferences ?? {}) },
-      customFields: { ...(existing?.customFields ?? {}), ...(profile.customFields ?? {}) },
+      attributes: { ...(existing?.attributes ?? {}), ...(profile.attributes ?? {}) },
     };
     await fs.writeFile(this.profileFile, JSON.stringify(merged, null, 2), 'utf-8');
   }
@@ -69,23 +66,107 @@ export class MemoryStore {
     await this.saveProfile(updates);
   }
 
-  // --- Resume storage ---
+  // --- Tracked items ---
 
-  async saveResume(text: string, parsed?: UserProfile): Promise<void> {
+  async saveItem(item: TrackedItem): Promise<void> {
     await this.ensureDirs();
-    await fs.writeFile(this.resumeFile, text, 'utf-8');
-    if (parsed) {
-      await this.saveProfile(parsed);
+    const filePath = path.join(this.itemsDir, `${item.id}.json`);
+    await fs.writeFile(filePath, JSON.stringify(item, null, 2), 'utf-8');
+  }
+
+  async getItems(filter?: TrackedItemFilter): Promise<TrackedItem[]> {
+    await this.ensureDirs();
+    const items: TrackedItem[] = [];
+    try {
+      const files = await fs.readdir(this.itemsDir);
+      for (const file of files) {
+        if (!file.endsWith('.json')) continue;
+        try {
+          const data = await fs.readFile(path.join(this.itemsDir, file), 'utf-8');
+          const item = JSON.parse(data) as TrackedItem;
+          if (filter) {
+            if (filter.collection && item.collection !== filter.collection) continue;
+            if (filter.status && item.status !== filter.status) continue;
+            if (filter.tags && !filter.tags.every(t => item.tags.includes(t))) continue;
+            if (filter.minScore !== undefined && (item.matchScore ?? 0) < filter.minScore) continue;
+            if (filter.query) {
+              const q = filter.query.toLowerCase();
+              const searchable = `${item.title} ${item.notes ?? ''} ${JSON.stringify(item.fields)}`.toLowerCase();
+              if (!searchable.includes(q)) continue;
+            }
+          }
+          items.push(item);
+        } catch {
+          continue;
+        }
+      }
+    } catch {
+      // no items dir
+    }
+    return items.sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  async deleteItem(id: string): Promise<void> {
+    try {
+      const filePath = path.join(this.itemsDir, `${id}.json`);
+      await fs.unlink(filePath);
+    } catch {
+      // Item doesn't exist
     }
   }
 
-  async getResume(): Promise<{ text: string; parsed: UserProfile | null } | null> {
+  async getCollections(): Promise<string[]> {
+    const items = await this.getItems();
+    const collections = new Set(items.map(i => i.collection));
+    return Array.from(collections).sort();
+  }
+
+  // --- Documents ---
+
+  async saveDocument(doc: UserDocument): Promise<void> {
+    await this.ensureDirs();
+    const filePath = path.join(this.documentsDir, `${doc.id}.json`);
+    await fs.writeFile(filePath, JSON.stringify(doc, null, 2), 'utf-8');
+  }
+
+  async getDocuments(type?: string): Promise<UserDocument[]> {
+    await this.ensureDirs();
+    const docs: UserDocument[] = [];
     try {
-      const text = await fs.readFile(this.resumeFile, 'utf-8');
-      const parsed = await this.getProfile();
-      return { text, parsed };
+      const files = await fs.readdir(this.documentsDir);
+      for (const file of files) {
+        if (!file.endsWith('.json')) continue;
+        try {
+          const data = await fs.readFile(path.join(this.documentsDir, file), 'utf-8');
+          const doc = JSON.parse(data) as UserDocument;
+          if (type && doc.type !== type) continue;
+          docs.push(doc);
+        } catch {
+          continue;
+        }
+      }
+    } catch {
+      // no documents dir
+    }
+    return docs.sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  async getDocument(id: string): Promise<UserDocument | null> {
+    try {
+      const filePath = path.join(this.documentsDir, `${id}.json`);
+      const data = await fs.readFile(filePath, 'utf-8');
+      return JSON.parse(data) as UserDocument;
     } catch {
       return null;
+    }
+  }
+
+  async deleteDocument(id: string): Promise<void> {
+    try {
+      const filePath = path.join(this.documentsDir, `${id}.json`);
+      await fs.unlink(filePath);
+    } catch {
+      // Document doesn't exist
     }
   }
 
@@ -229,78 +310,6 @@ export class MemoryStore {
     } catch {
       return [];
     }
-  }
-
-  // --- Job tracking ---
-
-  async saveJob(job: JobListing): Promise<void> {
-    await this.ensureDirs();
-    const filePath = path.join(this.jobsDir, `${job.id}.json`);
-    await fs.writeFile(filePath, JSON.stringify(job, null, 2), 'utf-8');
-  }
-
-  async getJobs(filters?: JobFilter): Promise<JobListing[]> {
-    await this.ensureDirs();
-    const jobs: JobListing[] = [];
-    try {
-      const files = await fs.readdir(this.jobsDir);
-      for (const file of files) {
-        if (!file.endsWith('.json')) continue;
-        try {
-          const data = await fs.readFile(path.join(this.jobsDir, file), 'utf-8');
-          const job = JSON.parse(data) as JobListing;
-          if (filters) {
-            if (filters.status && job.status !== filters.status) continue;
-            if (filters.company && !job.company.toLowerCase().includes(filters.company.toLowerCase())) continue;
-            if (filters.location && !job.location.toLowerCase().includes(filters.location.toLowerCase())) continue;
-            if (filters.minScore !== undefined && (job.matchScore ?? 0) < filters.minScore) continue;
-          }
-          jobs.push(job);
-        } catch {
-          continue;
-        }
-      }
-    } catch {
-      // no jobs dir
-    }
-    return jobs.sort((a, b) => (b.matchScore ?? 0) - (a.matchScore ?? 0));
-  }
-
-  async matchJobsToProfile(): Promise<JobMatch[]> {
-    const profile = await this.getProfile();
-    if (!profile) return [];
-
-    const jobs = await this.getJobs();
-    const profileSkills = new Set(profile.skills.map(s => s.toLowerCase()));
-
-    return jobs.map(job => {
-      const reqSkills = job.requirements.map(r => r.toLowerCase());
-      const matchedSkills: string[] = [];
-      const missingSkills: string[] = [];
-
-      for (const req of reqSkills) {
-        const found = [...profileSkills].some(ps =>
-          req.includes(ps) || ps.includes(req)
-        );
-        if (found) {
-          matchedSkills.push(req);
-        } else {
-          missingSkills.push(req);
-        }
-      }
-
-      const score = reqSkills.length > 0
-        ? Math.round((matchedSkills.length / reqSkills.length) * 100)
-        : 50;
-
-      return {
-        job,
-        score,
-        matchedSkills,
-        missingSkills,
-        reasoning: `Matched ${matchedSkills.length}/${reqSkills.length} requirements. ${missingSkills.length > 0 ? `Missing: ${missingSkills.slice(0, 3).join(', ')}` : 'All requirements met.'}`,
-      };
-    }).sort((a, b) => b.score - a.score);
   }
 
   // --- Site auth tracking ---

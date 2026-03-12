@@ -7,8 +7,8 @@ import { dataExtractSkill } from './builtin/data-extract.js';
 import { formFillSkill } from './builtin/form-fill.js';
 import { screenshotSkill } from './builtin/screenshot.js';
 import { navigateSkill } from './builtin/navigate.js';
-import { jobSearchSkill } from './builtin/job-search.js';
-import { resumeAnalyzerSkill } from './builtin/resume-analyzer.js';
+import { trackerSkill } from './builtin/tracker.js';
+import { documentsSkill } from './builtin/documents.js';
 import { smartBrowseSkill } from './builtin/smart-browse.js';
 
 export class SkillRegistry {
@@ -21,8 +21,8 @@ export class SkillRegistry {
     this.register(formFillSkill);
     this.register(screenshotSkill);
     this.register(navigateSkill);
-    this.register(jobSearchSkill);
-    this.register(resumeAnalyzerSkill);
+    this.register(trackerSkill);
+    this.register(documentsSkill);
     this.register(smartBrowseSkill);
   }
 

@@ -32,57 +32,63 @@ export interface UserProfile {
   phone?: string;
   location?: string;
   summary?: string;
-  skills: string[];
-  experience: WorkExperience[];
-  education: Education[];
-  preferences: Record<string, string>;
-  customFields: Record<string, unknown>;
+  /** Flexible key-value preferences and attributes */
+  attributes: Record<string, unknown>;
 }
 
-export interface WorkExperience {
-  title: string;
-  company: string;
-  startDate: string;
-  endDate?: string;
-  description: string;
-  skills: string[];
-}
-
-export interface Education {
-  institution: string;
-  degree: string;
-  field: string;
-  year: string;
-}
-
-export interface JobListing {
+export interface TrackedItem {
   id: string;
+  /** User-defined or auto-detected category: "job", "apartment", "contract", "product", etc. */
+  collection: string;
+  /** Primary label */
   title: string;
-  company: string;
-  location: string;
+  /** Source URL where this was found */
   url: string;
-  description: string;
-  requirements: string[];
-  salary?: string;
-  postedDate?: string;
+  /** When this item was first tracked */
+  createdAt: number;
+  /** When this item was last updated */
+  updatedAt: number;
+  /** User-controlled status lifecycle */
+  status: 'new' | 'saved' | 'applied' | 'rejected' | 'archived';
+  /** Match score (0-100) when compared against a document */
   matchScore?: number;
-  status: 'new' | 'applied' | 'saved' | 'rejected';
+  /** Free-form user notes */
   notes?: string;
+  /** Flexible key-value fields extracted from the page */
+  fields: Record<string, unknown>;
+  /** Tags for cross-collection organization */
+  tags: string[];
 }
 
-export interface JobFilter {
-  status?: JobListing['status'];
-  company?: string;
-  location?: string;
+export interface TrackedItemFilter {
+  collection?: string;
+  status?: TrackedItem['status'];
+  tags?: string[];
   minScore?: number;
+  /** Search across title, notes, and field values */
+  query?: string;
 }
 
-export interface JobMatch {
-  job: JobListing;
+export interface TrackedItemMatch {
+  item: TrackedItem;
   score: number;
-  matchedSkills: string[];
-  missingSkills: string[];
+  matchedCriteria: string[];
+  missingCriteria: string[];
   reasoning: string;
+}
+
+export interface UserDocument {
+  id: string;
+  /** Human-readable name */
+  name: string;
+  /** Category hint: "resume", "requirements", "portfolio", "wishlist", or any user string */
+  type: string;
+  /** Raw text content */
+  content: string;
+  /** When imported/updated */
+  updatedAt: number;
+  /** Optional structured data extracted by LLM */
+  parsed?: Record<string, unknown>;
 }
 
 export interface MemoryEntry {

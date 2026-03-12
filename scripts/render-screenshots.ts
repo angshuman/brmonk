@@ -63,8 +63,8 @@ function renderDashboard(): void {
   content.push('');
 
   // Session 1 - running
-  content.push(chalk.cyan('  ▸ ') + chalk.green('●') + ' ' + chalk.white.bold('Search for Senior React jobs on LinkedIn'));
-  content.push('      ' + chalk.green('Running · Step 12/50 · linkedin.com'));
+  content.push(chalk.cyan('  ▸ ') + chalk.green('●') + ' ' + chalk.white.bold('Search for 2BR apartments in Mission District'));
+  content.push('      ' + chalk.green('Running · Step 12/50 · craigslist.org'));
   // Session 2 - completed
   content.push('    ' + chalk.green('✓') + ' Extract pricing data from competitor websites');
   content.push('      ' + chalk.green('Completed · Found 24 pricing tiers across 5 sites'));
@@ -77,7 +77,8 @@ function renderDashboard(): void {
   content.push('');
   content.push(chalk.gray('  ─').repeat(10));
   content.push(`  ${chalk.bold('Profile')}: Alex Chen`);
-  content.push(`  ${chalk.gray('Skills')}: 12 · ${chalk.gray('Exp')}: 3 positions · ${chalk.gray('Jobs tracked')}: 47`);
+  content.push(`  ${chalk.gray('Documents')}: 3 · ${chalk.gray('Items tracked')}: 47`);
+  content.push(`  ${chalk.gray('Collections')}: jobs, apartments, products`);
   content.push('');
   content.push(chalk.gray('  Memory: 83 entries'));
   content.push('');
@@ -92,11 +93,11 @@ function renderSession(): void {
   content.push('');
   // Plan
   content.push(chalk.bold('  📋 Plan'));
-  content.push(`  ${chalk.green('✓')} 1. Navigate to LinkedIn Jobs`);
-  content.push(`  ${chalk.green('✓')} 2. Search for "Senior React Developer"`);
+  content.push(`  ${chalk.green('✓')} 1. Navigate to Craigslist apartments`);
+  content.push(`  ${chalk.green('✓')} 2. Search for "2BR Mission District"`);
   content.push(`  ${chalk.green('✓')} 3. Dismiss cookie consent and popups`);
-  content.push(`  ${chalk.yellow('→')} 4. Extract job listings from search results`);
-  content.push(`  ${chalk.gray(' ')} 5. Analyze each listing against resume`);
+  content.push(`  ${chalk.yellow('→')} 4. Extract listings from search results`);
+  content.push(`  ${chalk.gray(' ')} 5. Compare each listing against requirements`);
   content.push(`  ${chalk.gray(' ')} 6. Save top matches and present results`);
   content.push('');
   // Status
@@ -104,25 +105,25 @@ function renderSession(): void {
   content.push('');
   // Log
   content.push(chalk.bold('  Agent Log'));
-  content.push(`  · ${chalk.gray('Navigated to linkedin.com/jobs')}`);
+  content.push(`  · ${chalk.gray('Navigated to craigslist.org/search/apa')}`);
   content.push(`  · ${chalk.gray('Popup dismissed: Cookie consent')}`);
-  content.push(`  ⚡ ${chalk.cyan('type(index=5, text="Senior React Developer San Francisco")')}`);
+  content.push(`  ⚡ ${chalk.cyan('type(index=5, text="2BR Mission District")')}`);
   content.push(`  → ${chalk.white('Typed text into search field')}`);
   content.push(`  ⚡ ${chalk.cyan('click(index=6)')}`);
-  content.push(`  → ${chalk.white('Clicked search button, 47 results loaded')}`);
-  content.push(`  💭 ${chalk.gray('Found 47 results. Extracting details from each listing...')}`);
+  content.push(`  → ${chalk.white('Clicked search button, 35 results loaded')}`);
+  content.push(`  💭 ${chalk.gray('Found 35 results. Extracting details from each listing...')}`);
   content.push(`  ⚡ ${chalk.cyan('click(index=12)')}`);
-  content.push(`  → ${chalk.white('Opened: "Sr. React Engineer — Stripe" ')}`);
-  content.push(`  💭 ${chalk.gray('Good match: requires React, TypeScript, Node. Saving...')}`);
+  content.push(`  → ${chalk.white('Opened: "Sunny 2BR in Mission — $3,200/mo" ')}`);
+  content.push(`  💭 ${chalk.gray('Good match: 2BR, in-unit laundry, pet friendly. Saving...')}`);
   content.push(`  ⚡ ${chalk.cyan('click(index=15)')}`);
-  content.push(`  → ${chalk.white('Opened: "Senior Frontend — Vercel"')}`);
+  content.push(`  → ${chalk.white('Opened: "Renovated 2BR near BART — $2,900/mo"')}`);
   content.push('');
   // Current action
-  content.push(`  ${chalk.yellow('⏳')} ${chalk.yellow('extractText() → analyzing job requirements...')}`);
+  content.push(`  ${chalk.yellow('⏳')} ${chalk.yellow('extractText() → analyzing listing details...')}`);
   content.push('');
   content.push(chalk.gray('  [m] Send message  [p] Pause  [s] Screenshot  [b] Back  [Esc] Dashboard'));
 
-  const lines = drawBox('Session: Search for Senior React jobs on LinkedIn ─── Step 12/50', content, 'green', 'white');
+  const lines = drawBox('Session: Search for 2BR apartments in Mission District ─── Step 12/50', content, 'green', 'white');
   console.log(lines.join('\n'));
 }
 
@@ -131,15 +132,15 @@ function renderInput(): void {
   content.push('');
   content.push(chalk.bold('  What would you like me to do?'));
   content.push('');
-  content.push(`  ${chalk.cyan('>')} Search for senior React developer jobs in San Francisco on`);
-  content.push(`    LinkedIn and Indeed, compare them against my resume, and`);
+  content.push(`  ${chalk.cyan('>')} Search for 2BR apartments in Mission District on Craigslist`);
+  content.push(`    and Zillow, compare them against my requirements doc, and`);
   content.push(`    save the top 10 matches${chalk.gray('█')}`);
   content.push('');
   content.push(chalk.gray('  Suggestions:'));
-  content.push(chalk.gray('  · Search for jobs matching my profile'));
-  content.push(chalk.gray('  · Fill out a job application'));
-  content.push(chalk.gray('  · Research companies from my job list'));
-  content.push(chalk.gray('  · Import my resume'));
+  content.push(chalk.gray('  · Search for listings matching my requirements'));
+  content.push(chalk.gray('  · Track items from this page'));
+  content.push(chalk.gray('  · Compare saved items against my documents'));
+  content.push(chalk.gray('  · Import a document'));
   content.push('');
   content.push(chalk.gray('  [Enter] Submit  [Esc] Cancel'));
 

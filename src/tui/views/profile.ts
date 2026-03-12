@@ -12,13 +12,15 @@ export function renderProfile(renderer: Renderer, state: AppState): void {
     content.push('');
     content.push(chalk.gray('  To set up your profile, use:'));
     content.push(chalk.white('    brmonk profile set'));
-    content.push(chalk.gray('  Or import a resume:'));
-    content.push(chalk.white('    brmonk profile import <file>'));
+    content.push(chalk.gray('  Or import a document:'));
+    content.push(chalk.white('    brmonk docs import <file>'));
   } else {
     content.push(`  ${chalk.bold('Name')}: ${state.profile.name}`);
-    content.push(`  ${chalk.bold('Skills')}: ${state.profile.skills} skills`);
-    content.push(`  ${chalk.bold('Experience')}: ${state.profile.experience} positions`);
-    content.push(`  ${chalk.bold('Jobs Tracked')}: ${state.profile.jobCount}`);
+    content.push(`  ${chalk.bold('Documents')}: ${state.profile.documentCount}`);
+    content.push(`  ${chalk.bold('Items Tracked')}: ${state.profile.itemCount}`);
+    if (state.profile.collections.length > 0) {
+      content.push(`  ${chalk.bold('Collections')}: ${state.profile.collections.join(', ')}`);
+    }
   }
 
   content.push('');

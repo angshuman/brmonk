@@ -25,7 +25,7 @@ export interface AppState {
   currentView: 'dashboard' | 'session' | 'input' | 'action-required' | 'profile';
   sessions: SessionState[];
   activeSessionIndex: number;
-  profile: { name: string; skills: number; experience: number; jobCount: number } | null;
+  profile: { name: string; documentCount: number; itemCount: number; collections: string[] } | null;
   memoryCount: number;
   actionPrompt: string;
   actionType: 'login' | 'captcha' | 'confirmation';

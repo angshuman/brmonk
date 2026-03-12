@@ -3,10 +3,10 @@ import { Renderer } from '../renderer.js';
 import type { AppState } from '../state.js';
 
 const SUGGESTIONS = [
-  'Search for jobs matching my profile',
-  'Fill out a job application',
-  'Research companies from my job list',
-  'Import my resume',
+  'Search for listings matching my requirements',
+  'Track items from this page',
+  'Compare saved items against my documents',
+  'Import a document',
 ];
 
 function wrapText(text: string, maxWidth: number): string[] {

@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import * as readline from 'node:readline';
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import { loadConfig, saveConfig, showConfig, type Config } from './config.js';
 import { createProvider, type ProviderName } from './llm/provider.js';
 import { BrowserEngine } from './browser/engine.js';
@@ -397,7 +398,7 @@ profileCmd
       const profile = await memory.getProfile();
 
       if (!profile) {
-        logger.info('No profile set. Use `brmonk profile set` or `brmonk profile import <file>` to create one.');
+        logger.info('No profile set. Use `brmonk profile set` to create one.');
         return;
       }
 
@@ -407,18 +408,20 @@ profileCmd
       if (profile.phone) console.log(`  Phone: ${profile.phone}`);
       if (profile.location) console.log(`  Location: ${profile.location}`);
       if (profile.summary) console.log(`  Summary: ${profile.summary}`);
-      if (profile.skills.length > 0) console.log(`  Skills: ${profile.skills.join(', ')}`);
-      if (profile.experience.length > 0) {
-        console.log('  Experience:');
-        for (const exp of profile.experience) {
-          console.log(`    - ${exp.title} at ${exp.company} (${exp.startDate}${exp.endDate ? ` - ${exp.endDate}` : ' - present'})`);
+      if (profile.attributes && Object.keys(profile.attributes).length > 0) {
+        console.log('  Attributes:');
+        for (const [key, value] of Object.entries(profile.attributes)) {
+          console.log(`    ${key}: ${JSON.stringify(value)}`);
         }
       }
-      if (profile.education.length > 0) {
-        console.log('  Education:');
-        for (const edu of profile.education) {
-          console.log(`    - ${edu.degree} in ${edu.field}, ${edu.institution} (${edu.year})`);
-        }
+
+      const documents = await memory.getDocuments();
+      const items = await memory.getItems();
+      const collections = await memory.getCollections();
+      console.log(`\n  Documents: ${documents.length}`);
+      console.log(`  Items tracked: ${items.length}`);
+      if (collections.length > 0) {
+        console.log(`  Collections: ${collections.join(', ')}`);
       }
       console.log('');
     } catch (err) {
@@ -447,20 +450,28 @@ profileCmd
       const email = await ask('Email: ');
       const phone = await ask('Phone (optional): ');
       const location = await ask('Location (optional): ');
-      const skillsStr = await ask('Skills (comma-separated): ');
-      const summary = await ask('Professional summary (optional): ');
+      const attrsStr = await ask('Anything else? (key=value pairs, comma separated, optional): ');
 
       rl.close();
 
-      const skills = skillsStr.split(',').map(s => s.trim()).filter(Boolean);
+      const attributes: Record<string, unknown> = {};
+      if (attrsStr.trim()) {
+        for (const pair of attrsStr.split(',')) {
+          const eqIdx = pair.indexOf('=');
+          if (eqIdx > 0) {
+            const key = pair.slice(0, eqIdx).trim();
+            const value = pair.slice(eqIdx + 1).trim();
+            attributes[key] = value;
+          }
+        }
+      }
 
       await memory.saveProfile({
         name,
         email,
         phone: phone || undefined,
         location: location || undefined,
-        summary: summary || undefined,
-        skills,
+        attributes,
       });
 
       logger.success('Profile saved!');
@@ -472,9 +483,11 @@ profileCmd
 
 profileCmd
   .command('import')
-  .description('Import resume from a text file')
-  .argument('<file>', 'Path to resume text file')
-  .action(async (filePath: string) => {
+  .description('Import a document (resume, requirements, etc.) from a text file')
+  .argument('<file>', 'Path to text file')
+  .option('--name <name>', 'Document name (defaults to filename)')
+  .option('--type <type>', 'Document type', 'resume')
+  .action(async (filePath: string, opts: Record<string, unknown>) => {
     try {
       const config = await loadConfig();
       const memory = new MemoryStore(config.memoryDir);
@@ -494,44 +507,59 @@ profileCmd
         return;
       }
 
-      // Save raw resume text, profile parsing requires LLM which we don't have in CLI-only mode
-      await memory.saveResume(text);
-      logger.success(`Resume imported from ${filePath} (${text.length} chars)`);
-      logger.info('To parse it into a structured profile, run a task like "Parse my resume" in interactive mode.');
+      const docType = (opts['type'] as string) || 'resume';
+      const name = (opts['name'] as string) || path.basename(filePath, path.extname(filePath));
+      const docId = crypto.randomUUID().slice(0, 8);
+      await memory.saveDocument({
+        id: docId,
+        name,
+        type: docType,
+        content: text,
+        updatedAt: Date.now(),
+      });
+
+      logger.success(`Document imported: "${name}" (${docType}, ${text.length} chars)`);
     } catch (err) {
       logger.error(err instanceof Error ? err.message : String(err));
       process.exitCode = 1;
     }
   });
 
-// Jobs commands
-const jobsCmd = program
-  .command('jobs')
-  .description('Manage tracked jobs');
+// Items commands
+const itemsCmd = program
+  .command('items')
+  .description('Manage tracked items');
 
-jobsCmd
+itemsCmd
   .command('list')
-  .description('List tracked jobs')
-  .option('--status <status>', 'Filter by status (new, applied, saved, rejected)')
+  .description('List tracked items')
+  .option('--collection <collection>', 'Filter by collection')
+  .option('--status <status>', 'Filter by status (new, saved, applied, rejected, archived)')
+  .option('--query <search>', 'Search across titles, notes, and fields')
   .action(async (opts: Record<string, unknown>) => {
     try {
       const config = await loadConfig();
       const memory = new MemoryStore(config.memoryDir);
-      const filters = opts['status'] ? { status: opts['status'] as string } : undefined;
-      const jobs = await memory.getJobs(filters as Record<string, string> | undefined);
+      const filter: Record<string, unknown> = {};
+      if (opts['collection']) filter['collection'] = opts['collection'];
+      if (opts['status']) filter['status'] = opts['status'];
+      if (opts['query']) filter['query'] = opts['query'];
+      const items = await memory.getItems(Object.keys(filter).length > 0 ? filter as never : undefined);
 
-      if (jobs.length === 0) {
-        logger.info('No tracked jobs. Use job-search skill to find and save jobs.');
+      if (items.length === 0) {
+        logger.info('No tracked items. Use the tracker skill to save items while browsing.');
         return;
       }
 
-      console.log(`\nTracked Jobs (${jobs.length}):`);
-      for (const job of jobs) {
-        const score = job.matchScore !== undefined ? ` [${job.matchScore}%]` : '';
-        console.log(`  [${job.status}]${score} ${job.title} at ${job.company}`);
-        console.log(`    Location: ${job.location}`);
-        if (job.salary) console.log(`    Salary: ${job.salary}`);
-        console.log(`    URL: ${job.url}`);
+      console.log(`\nTracked Items (${items.length}):`);
+      for (const item of items) {
+        const score = item.matchScore !== undefined ? ` [${item.matchScore}%]` : '';
+        console.log(`  [${item.status}]${score} ${item.title}`);
+        const meta: string[] = [];
+        if (item.collection) meta.push(`Collection: ${item.collection}`);
+        if (item.tags.length > 0) meta.push(`Tags: ${item.tags.join(', ')}`);
+        if (meta.length > 0) console.log(`    ${meta.join(' · ')}`);
+        console.log(`    URL: ${item.url}`);
       }
       console.log('');
     } catch (err) {
@@ -540,32 +568,146 @@ jobsCmd
     }
   });
 
-jobsCmd
-  .command('match')
-  .description('Match tracked jobs against your profile')
+itemsCmd
+  .command('collections')
+  .description('List collections and item counts')
   .action(async () => {
     try {
       const config = await loadConfig();
       const memory = new MemoryStore(config.memoryDir);
-      const matches = await memory.matchJobsToProfile();
+      const collections = await memory.getCollections();
 
-      if (matches.length === 0) {
-        logger.info('No matches. Make sure you have a profile and tracked jobs.');
+      if (collections.length === 0) {
+        logger.info('No collections yet.');
         return;
       }
 
-      console.log(`\nJob Matches (${matches.length}):`);
-      for (const match of matches) {
-        console.log(`\n  ${match.job.title} at ${match.job.company} — ${match.score}% match`);
-        if (match.matchedSkills.length > 0) {
-          console.log(`    Matched: ${match.matchedSkills.join(', ')}`);
-        }
-        if (match.missingSkills.length > 0) {
-          console.log(`    Missing: ${match.missingSkills.join(', ')}`);
-        }
-        console.log(`    ${match.reasoning}`);
+      console.log('\nCollections:');
+      for (const collection of collections) {
+        const items = await memory.getItems({ collection });
+        console.log(`  ${collection}: ${items.length} items`);
       }
       console.log('');
+    } catch (err) {
+      logger.error(err instanceof Error ? err.message : String(err));
+      process.exitCode = 1;
+    }
+  });
+
+// Docs commands
+const docsCmd = program
+  .command('docs')
+  .description('Manage documents');
+
+docsCmd
+  .command('list')
+  .description('List stored documents')
+  .option('--type <type>', 'Filter by document type')
+  .action(async (opts: Record<string, unknown>) => {
+    try {
+      const config = await loadConfig();
+      const memory = new MemoryStore(config.memoryDir);
+      const docType = opts['type'] as string | undefined;
+      const documents = await memory.getDocuments(docType);
+
+      if (documents.length === 0) {
+        logger.info('No documents. Use `brmonk docs import <file>` to import one.');
+        return;
+      }
+
+      console.log(`\nDocuments (${documents.length}):`);
+      for (const doc of documents) {
+        const date = new Date(doc.updatedAt).toLocaleString();
+        console.log(`  [${doc.id}] ${doc.name} (${doc.type}, ${doc.content.length} chars)`);
+        console.log(`    Updated: ${date}`);
+      }
+      console.log('');
+    } catch (err) {
+      logger.error(err instanceof Error ? err.message : String(err));
+      process.exitCode = 1;
+    }
+  });
+
+docsCmd
+  .command('show')
+  .description('Show document content')
+  .argument('<id>', 'Document ID')
+  .action(async (id: string) => {
+    try {
+      const config = await loadConfig();
+      const memory = new MemoryStore(config.memoryDir);
+      const doc = await memory.getDocument(id);
+
+      if (!doc) {
+        logger.error(`Document '${id}' not found`);
+        process.exitCode = 1;
+        return;
+      }
+
+      console.log(`\nDocument: ${doc.name} (${doc.type})`);
+      console.log(`Updated: ${new Date(doc.updatedAt).toLocaleString()}`);
+      console.log('---');
+      console.log(doc.content);
+    } catch (err) {
+      logger.error(err instanceof Error ? err.message : String(err));
+      process.exitCode = 1;
+    }
+  });
+
+docsCmd
+  .command('import')
+  .description('Import a document from a text file')
+  .argument('<file>', 'Path to text file')
+  .option('--name <name>', 'Document name (defaults to filename)')
+  .option('--type <type>', 'Document type', 'resume')
+  .action(async (filePath: string, opts: Record<string, unknown>) => {
+    try {
+      const config = await loadConfig();
+      const memory = new MemoryStore(config.memoryDir);
+
+      let text: string;
+      try {
+        text = await fs.readFile(filePath, 'utf-8');
+      } catch {
+        logger.error(`Cannot read file: ${filePath}`);
+        process.exitCode = 1;
+        return;
+      }
+
+      if (!text.trim()) {
+        logger.error('File is empty');
+        process.exitCode = 1;
+        return;
+      }
+
+      const docType = (opts['type'] as string) || 'resume';
+      const name = (opts['name'] as string) || path.basename(filePath, path.extname(filePath));
+      const docId = crypto.randomUUID().slice(0, 8);
+      await memory.saveDocument({
+        id: docId,
+        name,
+        type: docType,
+        content: text,
+        updatedAt: Date.now(),
+      });
+
+      logger.success(`Document imported: "${name}" (${docType}, ${text.length} chars)`);
+    } catch (err) {
+      logger.error(err instanceof Error ? err.message : String(err));
+      process.exitCode = 1;
+    }
+  });
+
+docsCmd
+  .command('delete')
+  .description('Delete a stored document')
+  .argument('<id>', 'Document ID')
+  .action(async (id: string) => {
+    try {
+      const config = await loadConfig();
+      const memory = new MemoryStore(config.memoryDir);
+      await memory.deleteDocument(id);
+      logger.success(`Document '${id}' deleted`);
     } catch (err) {
       logger.error(err instanceof Error ? err.message : String(err));
       process.exitCode = 1;
