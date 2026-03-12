@@ -21,8 +21,14 @@ export interface SessionState {
   totalOutputTokens: number;
 }
 
+export interface SessionsHistoryState {
+  selectedIndex: number;
+  detailView: boolean;
+  scrollOffset: number;
+}
+
 export interface AppState {
-  currentView: 'dashboard' | 'session' | 'input' | 'action-required' | 'profile';
+  currentView: 'dashboard' | 'session' | 'input' | 'action-required' | 'profile' | 'sessions-history';
   sessions: SessionState[];
   activeSessionIndex: number;
   profile: {
@@ -47,6 +53,8 @@ export interface AppState {
   inputBuffer: string;
   messageInputMode: boolean;
   messageBuffer: string;
+  sessionsHistory: SessionsHistoryState;
+  sessionResults: import('../memory/types.js').SessionResult[];
 }
 
 export function createInitialState(): AppState {
@@ -61,6 +69,8 @@ export function createInitialState(): AppState {
     inputBuffer: '',
     messageInputMode: false,
     messageBuffer: '',
+    sessionsHistory: { selectedIndex: 0, detailView: false, scrollOffset: 0 },
+    sessionResults: [],
   };
 }
 

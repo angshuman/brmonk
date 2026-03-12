@@ -5,6 +5,7 @@ import type { AgentStep } from '../agent/types.js';
 import type {
   SessionRecord, MemoryFact, CachedResult, SessionSummary,
   UserProfile, TrackedItem, TrackedItemFilter, UserDocument, MemoryEntry,
+  SessionResult,
 } from './types.js';
 
 export class MemoryStore {
@@ -239,6 +240,48 @@ export class MemoryStore {
       // Directory doesn't exist yet
     }
     return summaries.sort((a, b) => b.timestamp - a.timestamp);
+  }
+
+  // --- Session results ---
+
+  async saveSessionResult(result: SessionResult): Promise<void> {
+    await this.ensureDirs();
+    const sessionDir = path.join(this.sessionsDir, result.sessionId);
+    await fs.mkdir(sessionDir, { recursive: true });
+    const filePath = path.join(sessionDir, 'result.json');
+    await fs.writeFile(filePath, JSON.stringify(result, null, 2), 'utf-8');
+  }
+
+  async getSessionResults(limit?: number): Promise<SessionResult[]> {
+    await this.ensureDirs();
+    const results: SessionResult[] = [];
+    try {
+      const entries = await fs.readdir(this.sessionsDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        try {
+          const resultPath = path.join(this.sessionsDir, entry.name, 'result.json');
+          const data = await fs.readFile(resultPath, 'utf-8');
+          results.push(JSON.parse(data) as SessionResult);
+        } catch {
+          // No result.json in this session directory
+        }
+      }
+    } catch {
+      // Sessions directory doesn't exist
+    }
+    results.sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
+    return limit ? results.slice(0, limit) : results;
+  }
+
+  async getSessionResult(sessionId: string): Promise<SessionResult | null> {
+    try {
+      const resultPath = path.join(this.sessionsDir, sessionId, 'result.json');
+      const data = await fs.readFile(resultPath, 'utf-8');
+      return JSON.parse(data) as SessionResult;
+    } catch {
+      return null;
+    }
   }
 
   // --- Long-term memory ---

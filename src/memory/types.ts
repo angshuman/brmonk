@@ -91,6 +91,19 @@ export interface UserDocument {
   parsed?: Record<string, unknown>;
 }
 
+export interface SessionResult {
+  sessionId: string;
+  task: string;
+  result: string;
+  status: 'completed' | 'failed' | 'max-steps';
+  startedAt: string;
+  completedAt: string;
+  steps: number;
+  toolsUsed: string[];
+  urls?: string[];
+  summary?: string;
+}
+
 export interface MemoryEntry {
   key: string;
   value: unknown;

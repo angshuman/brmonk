@@ -6,6 +6,7 @@ import { renderSession } from './views/session.js';
 import { renderInput } from './views/input.js';
 import { renderActionRequired } from './views/action-required.js';
 import { renderProfile } from './views/profile.js';
+import { renderSessionsList, renderSessionDetail } from './views/sessions.js';
 import { AgentEventBus, type AgentEvent } from '../events.js';
 import type { BrowserEngine } from '../browser/engine.js';
 import type { McpBrowserEngine } from '../browser/mcp-engine.js';
@@ -123,6 +124,16 @@ export class TUIApp {
       case 'profile':
         renderProfile(this.renderer, this.state);
         break;
+      case 'sessions-history':
+        if (this.state.sessionsHistory.detailView) {
+          const session = this.state.sessionResults[this.state.sessionsHistory.selectedIndex];
+          if (session) {
+            renderSessionDetail(this.renderer, session, this.state.sessionsHistory.scrollOffset);
+          }
+        } else {
+          renderSessionsList(this.renderer, this.state.sessionResults, this.state.sessionsHistory.selectedIndex);
+        }
+        break;
     }
 
     this.renderer.flush();
@@ -151,6 +162,9 @@ export class TUIApp {
       case 'profile':
         this.handleProfileKey(key);
         break;
+      case 'sessions-history':
+        this.handleSessionsHistoryKey(key);
+        break;
     }
   }
 
@@ -167,6 +181,9 @@ export class TUIApp {
       case 'p':
         this.state.currentView = 'profile';
         this.render();
+        break;
+      case 's':
+        void this.openSessionsHistory();
         break;
       case '\r': // Enter
         if (this.state.sessions.length > 0 && this.state.activeSessionIndex >= 0) {
@@ -324,6 +341,81 @@ export class TUIApp {
     }
   }
 
+  private async openSessionsHistory(): Promise<void> {
+    try {
+      const results = await this.memory.getSessionResults();
+      this.state.sessionResults = results;
+    } catch {
+      this.state.sessionResults = [];
+    }
+    this.state.sessionsHistory = { selectedIndex: 0, detailView: false, scrollOffset: 0 };
+    this.state.currentView = 'sessions-history';
+    this.render();
+  }
+
+  private handleSessionsHistoryKey(key: string): void {
+    const hist = this.state.sessionsHistory;
+
+    if (hist.detailView) {
+      // Detail view keys
+      switch (key) {
+        case 'b':
+        case '\x1b': // Escape
+          hist.detailView = false;
+          hist.scrollOffset = 0;
+          this.render();
+          break;
+        case '\x1b[A': // Up arrow
+        case 'k':
+          if (hist.scrollOffset > 0) {
+            hist.scrollOffset--;
+            this.render();
+          }
+          break;
+        case '\x1b[B': // Down arrow
+        case 'j':
+          hist.scrollOffset++;
+          this.render();
+          break;
+        default:
+          break;
+      }
+      return;
+    }
+
+    // List view keys
+    switch (key) {
+      case 'b':
+      case '\x1b': // Escape
+        this.state.currentView = 'dashboard';
+        this.render();
+        break;
+      case '\x1b[A': // Up arrow
+      case 'k':
+        if (hist.selectedIndex > 0) {
+          hist.selectedIndex--;
+          this.render();
+        }
+        break;
+      case '\x1b[B': // Down arrow
+      case 'j':
+        if (hist.selectedIndex < this.state.sessionResults.length - 1) {
+          hist.selectedIndex++;
+          this.render();
+        }
+        break;
+      case '\r': // Enter
+        if (this.state.sessionResults.length > 0) {
+          hist.detailView = true;
+          hist.scrollOffset = 0;
+          this.render();
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
   private startTask(task: string): void {
     const sessionId = crypto.randomUUID().slice(0, 8);
     this.eventBus.setSessionId(sessionId);
@@ -471,6 +563,9 @@ export class TUIApp {
           session.domain = '';
         }
         addLogEntry(session, 'info', `Navigated to ${event.url}`);
+        break;
+      case 'session-result':
+        // Session result saved — no additional action needed in event handler
         break;
     }
 

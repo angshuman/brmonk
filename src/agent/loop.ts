@@ -12,6 +12,7 @@ import type { SkillRegistry } from '../skills/registry.js';
 import type { Skill, SkillContext } from '../skills/types.js';
 import { SkillExecutor } from '../skills/executor.js';
 import type { MemoryStore } from '../memory/store.js';
+import type { SessionResult } from '../memory/types.js';
 import type { AgentEventBus } from '../events.js';
 import { withRetry } from '../utils/retry.js';
 import { logger } from '../utils/logger.js';
@@ -104,6 +105,9 @@ export class AgentLoop {
   private pendingMessages: string[] = [];
   private lastCaptchaCheckTime = 0;
   private lastCaptchaCheckUrl = '';
+  private startedAt = '';
+  private toolsUsedSet = new Set<string>();
+  private urlsVisited = new Set<string>();
 
   constructor(options: {
     llm: LLMProvider;
@@ -226,6 +230,9 @@ export class AgentLoop {
     this.lastObservationHash = '';
     this.pendingMessages = [];
     this.actionExecutor.resetStatus();
+    this.startedAt = new Date().toISOString();
+    this.toolsUsedSet.clear();
+    this.urlsVisited.clear();
 
     logger.thought(`Starting task: ${task}`);
     this.eventBus?.emitStatus('running');
@@ -512,6 +519,7 @@ export class AgentLoop {
           this.state.currentUrl = dom.url;
           this.state.pageTitle = dom.title;
           this.state.domSnapshot = dom.textRepresentation;
+          if (dom.url) this.urlsVisited.add(dom.url);
 
           // Check if observation changed from last step
           const obsHash = simpleHash(dom.textRepresentation);
@@ -588,6 +596,7 @@ export class AgentLoop {
       for (const toolCall of response.toolCalls) {
         logger.tool(toolCall.name, toolCall.arguments);
         this.eventBus?.emitAction(toolCall.name, toolCall.arguments as Record<string, unknown>);
+        this.toolsUsedSet.add(toolCall.name);
 
         let result = '';
 
@@ -732,9 +741,40 @@ export class AgentLoop {
 
     // Screenshot on failure
     if (this.state.status === 'failed') {
-      const sessionId = crypto.randomUUID().slice(0, 8);
-      const screenshotPath = path.join(os.homedir(), '.brmonk', 'screenshots', `failure-${sessionId}.png`);
+      const failId = crypto.randomUUID().slice(0, 8);
+      const screenshotPath = path.join(os.homedir(), '.brmonk', 'screenshots', `failure-${failId}.png`);
       await this.browser.screenshotToFile(screenshotPath);
+    }
+
+    // Save session result
+    if (this.memory && this.eventBus) {
+      let resultStatus: SessionResult['status'];
+      if (this.state.status === 'completed') {
+        resultStatus = 'completed';
+      } else if (this.state.result?.startsWith('Max steps')) {
+        resultStatus = 'max-steps';
+      } else {
+        resultStatus = 'failed';
+      }
+
+      const sessionResult: SessionResult = {
+        sessionId: this.eventBus.getSessionId(),
+        task,
+        result: this.state.result ?? '',
+        status: resultStatus,
+        startedAt: this.startedAt,
+        completedAt: new Date().toISOString(),
+        steps: this.state.stepCount,
+        toolsUsed: Array.from(this.toolsUsedSet),
+        urls: this.urlsVisited.size > 0 ? Array.from(this.urlsVisited) : undefined,
+      };
+
+      try {
+        await this.memory.saveSessionResult(sessionResult);
+        this.eventBus.emitSessionResult(sessionResult);
+      } catch {
+        // Non-critical — don't fail the session over result persistence
+      }
     }
 
     return this.getState();

@@ -43,7 +43,7 @@ const DEFAULTS: Config = {
   pauseOnCaptcha: true,
   pauseOnLogin: true,
   persistBrowserContext: true,
-  browserBackend: 'playwright',
+  browserBackend: 'playwright-mcp',
   mcpBrowser: {
     browser: 'chrome',
     isolated: false,

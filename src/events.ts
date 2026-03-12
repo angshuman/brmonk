@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import type { SessionResult } from './memory/types.js';
 
 export type AgentEvent =
   | { type: 'step'; sessionId: string; step: number; maxSteps: number }
@@ -13,7 +14,8 @@ export type AgentEvent =
   | { type: 'user-action-required'; sessionId: string; prompt: string; actionType: 'login' | 'captcha' | 'confirmation' }
   | { type: 'user-action-resolved'; sessionId: string }
   | { type: 'popup-dismissed'; sessionId: string; description: string }
-  | { type: 'page-navigated'; sessionId: string; url: string };
+  | { type: 'page-navigated'; sessionId: string; url: string }
+  | { type: 'session-result'; sessionId: string; sessionResult: SessionResult };
 
 export class AgentEventBus extends EventEmitter {
   private sessionId: string;
@@ -95,5 +97,9 @@ export class AgentEventBus extends EventEmitter {
 
   emitPageNavigated(url: string): void {
     this.emitEvent({ type: 'page-navigated', sessionId: this.sessionId, url });
+  }
+
+  emitSessionResult(sessionResult: SessionResult): void {
+    this.emitEvent({ type: 'session-result', sessionId: this.sessionId, sessionResult });
   }
 }

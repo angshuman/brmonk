@@ -68,7 +68,7 @@ export function renderDashboard(renderer: Renderer, state: AppState): void {
   }
 
   // Footer
-  content.push(chalk.gray('  [n] New session  [Enter] Open session  [p] Profile  [q] Quit'));
+  content.push(chalk.gray('  [n] New session  [Enter] Open session  [s] History  [p] Profile  [q] Quit'));
 
   const lines = renderer.drawBox('brmonk', content, { borderColor: 'cyan', titleColor: 'cyan' });
   for (const line of lines) {
