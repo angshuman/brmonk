@@ -8,6 +8,7 @@ import { renderActionRequired } from './views/action-required.js';
 import { renderProfile } from './views/profile.js';
 import { AgentEventBus, type AgentEvent } from '../events.js';
 import type { BrowserEngine } from '../browser/engine.js';
+import type { McpBrowserEngine } from '../browser/mcp-engine.js';
 import type { LLMProvider } from '../llm/types.js';
 import type { SkillRegistry } from '../skills/registry.js';
 import type { MemoryStore } from '../memory/store.js';
@@ -17,6 +18,7 @@ export class TUIApp {
   private renderer: Renderer;
   private state: AppState;
   private browser: BrowserEngine;
+  private mcpEngine: McpBrowserEngine | null;
   private llm: LLMProvider;
   private skillRegistry: SkillRegistry;
   private memory: MemoryStore;
@@ -27,6 +29,7 @@ export class TUIApp {
 
   constructor(options: {
     browser: BrowserEngine;
+    mcpEngine?: McpBrowserEngine;
     llm: LLMProvider;
     skillRegistry: SkillRegistry;
     memory: MemoryStore;
@@ -35,6 +38,7 @@ export class TUIApp {
     this.renderer = new Renderer();
     this.state = createInitialState();
     this.browser = options.browser;
+    this.mcpEngine = options.mcpEngine ?? null;
     this.llm = options.llm;
     this.skillRegistry = options.skillRegistry;
     this.memory = options.memory;
@@ -332,6 +336,7 @@ export class TUIApp {
     this.currentAgent = new AgentLoop({
       llm: this.llm,
       browser: this.browser,
+      mcpEngine: this.mcpEngine ?? undefined,
       skillRegistry: this.skillRegistry,
       memory: this.memory,
       eventBus: this.eventBus,
@@ -380,6 +385,7 @@ export class TUIApp {
     this.currentAgent = new AgentLoop({
       llm: this.llm,
       browser: this.browser,
+      mcpEngine: this.mcpEngine ?? undefined,
       skillRegistry: this.skillRegistry,
       memory: this.memory,
       eventBus: this.eventBus,

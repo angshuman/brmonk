@@ -362,19 +362,79 @@ export class BrowserEngine {
     return false;
   }
 
-  async detectCaptcha(): Promise<boolean> {
+  async detectCaptcha(): Promise<{ detected: boolean; type: string | null; element: string | null }> {
     const page = this.currentPage();
     return await page.evaluate(() => {
-      const recaptcha = document.querySelector('iframe[src*="recaptcha"]') ??
-        document.querySelector('.g-recaptcha') ??
-        document.querySelector('#recaptcha');
-      const hcaptcha = document.querySelector('iframe[src*="hcaptcha"]') ??
-        document.querySelector('.h-captcha');
-      const turnstile = document.querySelector('iframe[src*="turnstile"]') ??
-        document.querySelector('.cf-turnstile');
-      const generic = document.querySelector('[class*="captcha" i]') ??
-        document.querySelector('[id*="captcha" i]');
-      return !!(recaptcha || hcaptcha || turnstile || generic);
+      // Helper: check if element is actually visible and has meaningful size
+      function isVisibleAndSized(el: Element): boolean {
+        const style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+        const rect = el.getBoundingClientRect();
+        // Must be at least 30x30 pixels to be a real CAPTCHA widget
+        if (rect.width < 30 || rect.height < 30) return false;
+        // Must be within the viewport (not positioned off-screen)
+        if (rect.bottom < 0 || rect.top > window.innerHeight) return false;
+        // Check parent visibility too
+        let parent = el.parentElement;
+        while (parent) {
+          const ps = window.getComputedStyle(parent);
+          if (ps.display === 'none' || ps.visibility === 'hidden') return false;
+          parent = parent.parentElement;
+        }
+        return true;
+      }
+
+      // 1. Check for reCAPTCHA v2 challenge (the iframe that shows the puzzle)
+      const recaptchaFrames = document.querySelectorAll('iframe[src*="recaptcha"][src*="bframe"]');
+      for (const frame of recaptchaFrames) {
+        if (isVisibleAndSized(frame)) {
+          return { detected: true, type: 'recaptcha-v2-challenge', element: 'iframe' };
+        }
+      }
+
+      // 2. Check for reCAPTCHA checkbox that is NOT already checked
+      const recaptchaCheckboxes = document.querySelectorAll('iframe[src*="recaptcha"][src*="anchor"]');
+      for (const frame of recaptchaCheckboxes) {
+        if (isVisibleAndSized(frame)) {
+          return { detected: true, type: 'recaptcha-v2-checkbox', element: 'iframe' };
+        }
+      }
+
+      // 3. Check for hCaptcha challenge
+      const hcaptchaFrames = document.querySelectorAll('iframe[src*="hcaptcha.com"]');
+      for (const frame of hcaptchaFrames) {
+        if (isVisibleAndSized(frame)) {
+          return { detected: true, type: 'hcaptcha', element: 'iframe' };
+        }
+      }
+
+      // 4. Check for Cloudflare Turnstile
+      const turnstileFrames = document.querySelectorAll('iframe[src*="challenges.cloudflare.com"]');
+      for (const frame of turnstileFrames) {
+        if (isVisibleAndSized(frame)) {
+          return { detected: true, type: 'cloudflare-turnstile', element: 'iframe' };
+        }
+      }
+
+      // 5. Check for visible CAPTCHA challenge overlays/modals (NOT just any element with captcha class)
+      const challengeSelectors = [
+        '.g-recaptcha:not(.g-recaptcha-response)',
+        '#captcha-container',
+        '.captcha-challenge',
+        '.captcha-modal',
+        '[data-captcha-challenge]',
+      ];
+
+      for (const sel of challengeSelectors) {
+        const els = document.querySelectorAll(sel);
+        for (const el of els) {
+          if (isVisibleAndSized(el)) {
+            return { detected: true, type: 'generic-captcha', element: sel };
+          }
+        }
+      }
+
+      return { detected: false, type: null, element: null };
     });
   }
 

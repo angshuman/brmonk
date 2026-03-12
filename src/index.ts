@@ -1,6 +1,7 @@
 import { loadConfig, type Config } from './config.js';
 import { createProvider, type ProviderName } from './llm/provider.js';
 import { BrowserEngine } from './browser/engine.js';
+import { McpBrowserEngine } from './browser/mcp-engine.js';
 import { AgentLoop } from './agent/loop.js';
 import { SkillRegistry } from './skills/registry.js';
 import { MemoryStore } from './memory/store.js';
@@ -20,6 +21,7 @@ export interface BrmonkOptions {
 export class Brmonk {
   private config: Config | null = null;
   private browser: BrowserEngine | null = null;
+  private mcpEngine: McpBrowserEngine | null = null;
   private agent: AgentLoop | null = null;
   private memory: MemoryStore | null = null;
   private skillRegistry: SkillRegistry | null = null;
@@ -55,9 +57,15 @@ export class Brmonk {
     await this.skillRegistry.loadFromDirectory(this.config.skillsDir);
     await this.browser.launch();
 
+    if (this.config.browserBackend === 'playwright-mcp') {
+      this.mcpEngine = new McpBrowserEngine(this.config.headless, this.config.mcpBrowser);
+      await this.mcpEngine.initialize();
+    }
+
     this.agent = new AgentLoop({
       llm,
       browser: this.browser,
+      mcpEngine: this.mcpEngine ?? undefined,
       skillRegistry: this.skillRegistry,
       memory: this.memory,
       eventBus: this.eventBus,
@@ -91,6 +99,10 @@ export class Brmonk {
   }
 
   async close(): Promise<void> {
+    if (this.mcpEngine) {
+      await this.mcpEngine.close();
+      this.mcpEngine = null;
+    }
     if (this.browser) {
       await this.browser.close();
       this.browser = null;
@@ -112,6 +124,7 @@ export type {
   SessionRecord, MemoryFact, CachedResult, SessionSummary,
 } from './memory/types.js';
 export { BrowserEngine } from './browser/engine.js';
+export { McpBrowserEngine } from './browser/mcp-engine.js';
 export { AgentLoop } from './agent/loop.js';
 export { SkillRegistry } from './skills/registry.js';
 export { MemoryStore } from './memory/store.js';

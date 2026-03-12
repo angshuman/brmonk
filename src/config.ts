@@ -3,6 +3,14 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { config as loadDotenv } from 'dotenv';
 
+export interface McpBrowserConfig {
+  browser?: string;       // 'chrome' | 'firefox' | 'webkit' | 'msedge', default: 'chrome'
+  isolated?: boolean;     // default: false
+  userDataDir?: string;   // path to user data dir
+  viewport?: string;      // e.g. '1280,720'
+  extraArgs?: string[];   // any additional CLI args
+}
+
 export interface Config {
   provider: 'claude' | 'openai' | 'grok' | 'auto';
   model: string;
@@ -17,6 +25,8 @@ export interface Config {
   pauseOnCaptcha: boolean;
   pauseOnLogin: boolean;
   persistBrowserContext: boolean;
+  browserBackend: 'playwright' | 'playwright-mcp';
+  mcpBrowser: McpBrowserConfig;
 }
 
 const DEFAULTS: Config = {
@@ -33,6 +43,11 @@ const DEFAULTS: Config = {
   pauseOnCaptcha: true,
   pauseOnLogin: true,
   persistBrowserContext: true,
+  browserBackend: 'playwright',
+  mcpBrowser: {
+    browser: 'chrome',
+    isolated: false,
+  },
 };
 
 export async function loadConfig(cliOverrides?: Partial<Config>): Promise<Config> {

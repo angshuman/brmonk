@@ -9,6 +9,7 @@ import * as os from 'node:os';
 import { loadConfig, saveConfig, showConfig, type Config } from './config.js';
 import { createProvider, type ProviderName } from './llm/provider.js';
 import { BrowserEngine } from './browser/engine.js';
+import { McpBrowserEngine } from './browser/mcp-engine.js';
 import { AgentLoop } from './agent/loop.js';
 import { SkillRegistry } from './skills/registry.js';
 import { MemoryStore } from './memory/store.js';
@@ -31,10 +32,17 @@ program
       const skillRegistry = new SkillRegistry();
       const memory = new MemoryStore(config.memoryDir);
 
+      let mcpEngine: McpBrowserEngine | undefined;
+      if (config.browserBackend === 'playwright-mcp') {
+        mcpEngine = new McpBrowserEngine(config.headless, config.mcpBrowser);
+        await mcpEngine.initialize();
+      }
+
       await skillRegistry.loadFromDirectory(config.skillsDir);
       await browser.launch();
 
       const cleanup = async (): Promise<void> => {
+        if (mcpEngine) await mcpEngine.close();
         await browser.close();
         process.exit(0);
       };
@@ -43,6 +51,7 @@ program
 
       const app = new TUIApp({
         browser,
+        mcpEngine,
         llm: provider,
         skillRegistry,
         memory,
@@ -86,6 +95,12 @@ program
       const memory = new MemoryStore(config.memoryDir);
       const eventBus = new AgentEventBus();
 
+      let mcpEngine: McpBrowserEngine | undefined;
+      if (config.browserBackend === 'playwright-mcp') {
+        mcpEngine = new McpBrowserEngine(config.headless, config.mcpBrowser);
+        await mcpEngine.initialize();
+      }
+
       // Load user skills
       await skillRegistry.loadFromDirectory(config.skillsDir);
 
@@ -95,6 +110,7 @@ program
       // Setup graceful shutdown
       const cleanup = async (): Promise<void> => {
         logger.info('Shutting down...');
+        if (mcpEngine) await mcpEngine.close();
         await browser.close();
         process.exit(0);
       };
@@ -105,6 +121,7 @@ program
       const agent = new AgentLoop({
         llm: provider,
         browser,
+        mcpEngine,
         skillRegistry,
         memory,
         eventBus,
@@ -159,11 +176,18 @@ program
       const memory = new MemoryStore(config.memoryDir);
       const eventBus = new AgentEventBus();
 
+      let mcpEngine: McpBrowserEngine | undefined;
+      if (config.browserBackend === 'playwright-mcp') {
+        mcpEngine = new McpBrowserEngine(config.headless, config.mcpBrowser);
+        await mcpEngine.initialize();
+      }
+
       await skillRegistry.loadFromDirectory(config.skillsDir);
       await browser.launch();
 
       const cleanup = async (): Promise<void> => {
         logger.info('Shutting down...');
+        if (mcpEngine) await mcpEngine.close();
         await browser.close();
         process.exit(0);
       };
@@ -173,6 +197,7 @@ program
       const agent = new AgentLoop({
         llm: provider,
         browser,
+        mcpEngine,
         skillRegistry,
         memory,
         eventBus,

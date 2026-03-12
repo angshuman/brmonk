@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import type { LLMProvider, LLMMessage, LLMToolDefinition } from '../llm/types.js';
 import type { BrowserEngine } from '../browser/engine.js';
+import type { McpBrowserEngine } from '../browser/mcp-engine.js';
 import { ActionExecutor, getBrowserToolDefinitions } from '../browser/actions.js';
 import { extractDOM } from '../browser/dom.js';
 import { TaskPlanner } from './planner.js';
@@ -88,6 +89,7 @@ function simpleHash(str: string): string {
 export class AgentLoop {
   private llm: LLMProvider;
   private browser: BrowserEngine;
+  private mcpEngine: McpBrowserEngine | null;
   private actionExecutor: ActionExecutor;
   private planner: TaskPlanner;
   private skillRegistry: SkillRegistry | null;
@@ -100,10 +102,13 @@ export class AgentLoop {
   private pauseResolver: (() => void) | null = null;
   private lastObservationHash = '';
   private pendingMessages: string[] = [];
+  private lastCaptchaCheckTime = 0;
+  private lastCaptchaCheckUrl = '';
 
   constructor(options: {
     llm: LLMProvider;
     browser: BrowserEngine;
+    mcpEngine?: McpBrowserEngine;
     skillRegistry?: SkillRegistry;
     memory?: MemoryStore;
     eventBus?: AgentEventBus;
@@ -111,6 +116,7 @@ export class AgentLoop {
   }) {
     this.llm = options.llm;
     this.browser = options.browser;
+    this.mcpEngine = options.mcpEngine ?? null;
     this.actionExecutor = new ActionExecutor(options.browser);
     this.planner = new TaskPlanner(options.llm);
     this.skillRegistry = options.skillRegistry ?? null;
@@ -320,8 +326,16 @@ export class AgentLoop {
       { role: 'user', content: `Task: ${task}` },
     ];
 
-    // Build tools list
-    const browserTools = getBrowserToolDefinitions();
+    // Build tools list — use MCP tools when available, otherwise built-in browser tools
+    let browserTools: LLMToolDefinition[];
+    if (this.mcpEngine) {
+      // MCP mode: use MCP tools + done/fail from built-in tools
+      const builtinTools = getBrowserToolDefinitions();
+      const controlTools = builtinTools.filter(t => t.name === 'done' || t.name === 'fail');
+      browserTools = [...this.mcpEngine.getTools(), ...controlTools];
+    } else {
+      browserTools = getBrowserToolDefinitions();
+    }
     const memoryTools: LLMToolDefinition[] = [];
     if (this.memory) {
       memoryTools.push(
@@ -384,8 +398,8 @@ export class AgentLoop {
       logger.thought(`Step ${this.state.stepCount}/${this.state.maxSteps}`);
       this.eventBus?.emitStep(this.state.stepCount, this.state.maxSteps);
 
-      // Pre-step: auto-dismiss popups (only after navigation)
-      if (this.browser.shouldDismissPopups()) {
+      // Pre-step: auto-dismiss popups (only after navigation, skip in MCP mode)
+      if (!this.mcpEngine && this.browser.shouldDismissPopups()) {
         try {
           const dismissed = await this.browser.dismissPopups();
           for (const d of dismissed) {
@@ -396,31 +410,68 @@ export class AgentLoop {
         }
       }
 
-      // Pre-step: detect CAPTCHA — try auto-solve first, fall back to user
-      try {
-        const hasCaptcha = await this.browser.detectCaptcha();
-        if (hasCaptcha) {
-          logger.thought('CAPTCHA detected — attempting auto-solve...');
-          this.eventBus?.emitThought('CAPTCHA detected, attempting to solve...');
-          const solved = await this.browser.attemptCaptchaSolve();
-          if (solved) {
-            logger.thought('CAPTCHA solved automatically');
-            this.eventBus?.emitThought('CAPTCHA solved automatically');
-          } else {
-            logger.thought('CAPTCHA requires manual solving');
-            this.state.status = 'waiting-for-user';
-            this.eventBus?.emitUserActionRequired('CAPTCHA detected. Please solve the CAPTCHA in the browser window.', 'captcha');
-            await this.browser.waitForUserAction('Please solve the CAPTCHA in the browser window, then press Enter to continue.');
-            this.state.status = 'running';
-            this.eventBus?.emitStatus('running');
+      // Pre-step: detect CAPTCHA with cooldown — skip in MCP mode (MCP server manages browser)
+      if (!this.mcpEngine) try {
+        const currentUrl = this.browser.getCurrentDomain();
+        const now = Date.now();
+        const urlChanged = currentUrl !== this.lastCaptchaCheckUrl;
+        const cooldownExpired = (now - this.lastCaptchaCheckTime) > 10000;
+        if (urlChanged || cooldownExpired) {
+          this.lastCaptchaCheckTime = now;
+          this.lastCaptchaCheckUrl = currentUrl;
+          const captchaResult = await this.browser.detectCaptcha();
+          if (captchaResult.detected) {
+            const captchaType = captchaResult.type;
+            logger.thought(`CAPTCHA detected (${captchaType}) — handling...`);
+            this.eventBus?.emitThought(`CAPTCHA detected: ${captchaType}`);
+
+            if (captchaType === 'recaptcha-v2-checkbox') {
+              // Checkbox — try clicking it
+              const solved = await this.browser.attemptCaptchaSolve();
+              if (solved) {
+                logger.thought('CAPTCHA checkbox solved automatically');
+                this.eventBus?.emitThought('CAPTCHA solved automatically');
+              } else {
+                logger.thought('CAPTCHA checkbox click failed — asking user');
+                this.state.status = 'waiting-for-user';
+                this.eventBus?.emitUserActionRequired('CAPTCHA detected. Please solve the CAPTCHA in the browser window.', 'captcha');
+                await this.browser.waitForUserAction('Please solve the CAPTCHA in the browser window, then press Enter to continue.');
+                this.state.status = 'running';
+                this.eventBus?.emitStatus('running');
+              }
+            } else if (captchaType === 'cloudflare-turnstile') {
+              // Turnstile often auto-solves — wait a few seconds first
+              logger.thought('Cloudflare Turnstile detected — waiting for auto-solve...');
+              this.eventBus?.emitThought('Waiting for Turnstile to auto-solve...');
+              await new Promise(r => setTimeout(r, 5000));
+              const recheck = await this.browser.detectCaptcha();
+              if (recheck.detected) {
+                this.state.status = 'waiting-for-user';
+                this.eventBus?.emitUserActionRequired('Cloudflare Turnstile still present. Please complete it in the browser.', 'captcha');
+                await this.browser.waitForUserAction('Please complete the Cloudflare challenge, then press Enter to continue.');
+                this.state.status = 'running';
+                this.eventBus?.emitStatus('running');
+              } else {
+                logger.thought('Turnstile resolved automatically');
+                this.eventBus?.emitThought('Turnstile resolved automatically');
+              }
+            } else {
+              // Challenge frames (recaptcha-v2-challenge, hcaptcha, generic-captcha) — can't auto-solve
+              logger.thought('CAPTCHA challenge requires manual solving');
+              this.state.status = 'waiting-for-user';
+              this.eventBus?.emitUserActionRequired(`CAPTCHA (${captchaType}) detected. Please solve it in the browser window.`, 'captcha');
+              await this.browser.waitForUserAction('Please solve the CAPTCHA in the browser window, then press Enter to continue.');
+              this.state.status = 'running';
+              this.eventBus?.emitStatus('running');
+            }
           }
         }
       } catch {
         // Detection failed, continue
       }
 
-      // Pre-step: detect login page
-      try {
+      // Pre-step: detect login page — skip in MCP mode
+      if (!this.mcpEngine) try {
         const domain = this.browser.getCurrentDomain();
         if (domain && !this.browser.isAuthenticated(domain)) {
           const isLogin = await this.browser.detectLoginPage();
@@ -449,26 +500,30 @@ export class AgentLoop {
         }
       }
 
-      // OBSERVE: Extract DOM state
+      // OBSERVE: Extract DOM state (skip in MCP mode — MCP tools return their own observations)
       let observation: string;
-      try {
-        const page = this.browser.currentPage();
-        const dom = await extractDOM(page);
-        this.actionExecutor.updateElementMap(dom.elementMap);
-        this.state.currentUrl = dom.url;
-        this.state.pageTitle = dom.title;
-        this.state.domSnapshot = dom.textRepresentation;
+      if (this.mcpEngine) {
+        observation = 'Browser is managed by MCP server. Use the browser_* tools to interact with the page.';
+      } else {
+        try {
+          const page = this.browser.currentPage();
+          const dom = await extractDOM(page);
+          this.actionExecutor.updateElementMap(dom.elementMap);
+          this.state.currentUrl = dom.url;
+          this.state.pageTitle = dom.title;
+          this.state.domSnapshot = dom.textRepresentation;
 
-        // Check if observation changed from last step
-        const obsHash = simpleHash(dom.textRepresentation);
-        if (obsHash === this.lastObservationHash) {
-          observation = 'Page unchanged from previous observation.';
-        } else {
-          observation = dom.textRepresentation;
-          this.lastObservationHash = obsHash;
+          // Check if observation changed from last step
+          const obsHash = simpleHash(dom.textRepresentation);
+          if (obsHash === this.lastObservationHash) {
+            observation = 'Page unchanged from previous observation.';
+          } else {
+            observation = dom.textRepresentation;
+            this.lastObservationHash = obsHash;
+          }
+        } catch {
+          observation = 'No page loaded yet. Use goTo(url) to navigate to a website.';
         }
-      } catch {
-        observation = 'No page loaded yet. Use goTo(url) to navigate to a website.';
       }
 
       // Add observation to messages
@@ -602,6 +657,21 @@ export class AgentLoop {
               result = await skillHandler.execute(toolCall.name, toolCall.arguments as Record<string, unknown>, skillContext);
             } catch (err) {
               result = `Skill error: ${err instanceof Error ? err.message : String(err)}`;
+            }
+          } else if (this.mcpEngine && toolCall.name !== 'done' && toolCall.name !== 'fail') {
+            // MCP browser action — route to MCP engine
+            try {
+              const mcpResult = await this.mcpEngine.callTool(toolCall.name, toolCall.arguments as Record<string, unknown>);
+              result = mcpResult.content
+                .map(c => c.text ?? (c.data ? `[${c.mimeType ?? 'binary'} data]` : ''))
+                .filter(Boolean)
+                .join('\n') || 'Done';
+              if (mcpResult.isError) {
+                result = `MCP error: ${result}`;
+              }
+              logger.action(`${toolCall.name} (MCP): ${result.slice(0, 200)}`);
+            } catch (err) {
+              result = `MCP tool error: ${err instanceof Error ? err.message : String(err)}`;
             }
           } else {
             // Browser action
