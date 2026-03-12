@@ -3,8 +3,11 @@
  * Executes shell commands, scripts, browser actions, LLM calls, and conditionals.
  */
 
-import { execFile, spawn } from 'node:child_process';
+import { exec, spawn } from 'node:child_process';
 import * as path from 'node:path';
+import * as os from 'node:os';
+
+const IS_WINDOWS = os.platform() === 'win32';
 import type { BrowserEngine } from '../browser/engine.js';
 import { ActionExecutor } from '../browser/actions.js';
 import type { LLMProvider } from '../llm/types.js';
@@ -106,11 +109,14 @@ export class SkillExecutor {
     logger.tool('shell', { command: command.slice(0, 100) });
 
     return new Promise<string>((resolve, reject) => {
-      const proc = execFile('bash', ['-c', command], {
+      // Use exec() which delegates to the platform's default shell
+      // (cmd.exe on Windows, /bin/sh on Unix)
+      const proc = exec(command, {
         cwd,
         timeout,
         maxBuffer: 1024 * 1024, // 1MB
         env,
+        shell: IS_WINDOWS ? 'cmd.exe' : '/bin/bash',
       }, (error, stdout, stderr) => {
         if (error && (error as NodeJS.ErrnoException & { killed?: boolean }).killed) {
           reject(new Error(`Shell command timed out after ${step.timeout ?? DEFAULT_TIMEOUT}s`));
@@ -124,7 +130,14 @@ export class SkillExecutor {
       // Safety: force kill if process handle exists
       if (proc.pid) {
         setTimeout(() => {
-          try { proc.kill('SIGKILL'); } catch { /* already dead */ }
+          try {
+            if (IS_WINDOWS) {
+              // On Windows, use taskkill to terminate the process tree
+              spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { stdio: 'ignore' });
+            } else {
+              proc.kill('SIGKILL');
+            }
+          } catch { /* already dead */ }
         }, timeout + 5000);
       }
     });
@@ -141,20 +154,22 @@ export class SkillExecutor {
       if (ext === '.py') runtime = 'python';
       else if (ext === '.mjs' || ext === '.js' || ext === '.ts') runtime = 'node';
       else if (ext === '.sh' || ext === '.bash') runtime = 'bash';
-      else runtime = 'bash'; // default
+      else runtime = IS_WINDOWS ? 'node' : 'bash'; // default: node on Windows, bash on Unix
     }
 
-    // Build command based on runtime
+    // Build command based on runtime (cross-platform)
     let executable: string;
     switch (runtime) {
       case 'python':
-        executable = 'python3';
+        // 'python' works on Windows; 'python3' on macOS/Linux
+        executable = IS_WINDOWS ? 'python' : 'python3';
         break;
       case 'node':
         executable = 'node';
         break;
       case 'bash':
-        executable = 'bash';
+        // On Windows, try using the script's extension handler or fall back to node
+        executable = IS_WINDOWS ? 'bash' : 'bash';
         break;
       default:
         executable = runtime;
@@ -204,7 +219,13 @@ export class SkillExecutor {
 
       // Safety kill
       setTimeout(() => {
-        try { proc.kill('SIGKILL'); } catch { /* already dead */ }
+        try {
+          if (IS_WINDOWS) {
+            spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { stdio: 'ignore' });
+          } else {
+            proc.kill('SIGKILL');
+          }
+        } catch { /* already dead */ }
       }, timeout + 5000);
     });
   }

@@ -17,7 +17,7 @@ export const trackerSkill: Skill = {
         properties: {
           url: { type: 'string', description: 'URL of the page to extract from (uses current page if omitted)' },
           collection: { type: 'string', description: 'Collection name (e.g. "jobs", "apartments"). Auto-detected if omitted.' },
-          tags: { type: 'array', description: 'Optional tags to apply' },
+          tags: { type: 'array', items: { type: 'string' }, description: 'Optional tags to apply' },
         },
       },
     },
@@ -30,7 +30,7 @@ export const trackerSkill: Skill = {
           collection: { type: 'string', description: 'Filter by collection name' },
           status: { type: 'string', description: 'Filter by status: new, saved, applied, rejected, archived' },
           query: { type: 'string', description: 'Search across titles, notes, and fields' },
-          tags: { type: 'array', description: 'Filter by tags (must match all)' },
+          tags: { type: 'array', items: { type: 'string' }, description: 'Filter by tags (must match all)' },
         },
       },
     },

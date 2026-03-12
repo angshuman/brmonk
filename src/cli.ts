@@ -5,6 +5,7 @@ import * as readline from 'node:readline';
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import * as os from 'node:os';
 import { loadConfig, saveConfig, showConfig, type Config } from './config.js';
 import { createProvider, type ProviderName } from './llm/provider.js';
 import { BrowserEngine } from './browser/engine.js';
@@ -243,7 +244,7 @@ Or type any task to execute it.
               case '/screenshot': {
                 try {
                   const page = browser.currentPage();
-                  const screenshotPath = `/tmp/brmonk-screenshot-${Date.now()}.png`;
+                  const screenshotPath = path.join(os.tmpdir(), `brmonk-screenshot-${Date.now()}.png`);
                   await page.screenshot({ path: screenshotPath });
                   logger.success(`Screenshot saved to ${screenshotPath}`);
                 } catch (err) {

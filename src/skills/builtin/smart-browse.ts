@@ -31,6 +31,7 @@ Use these for complex tasks that require visiting multiple pages and synthesizin
         properties: {
           urls: {
             type: 'array',
+            items: { type: 'string' },
             description: 'List of URLs to compare',
           },
         },
@@ -45,6 +46,14 @@ Use these for complex tasks that require visiting multiple pages and synthesizin
         properties: {
           steps: {
             type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                action: { type: 'string', description: 'Action to perform' },
+                params: { type: 'object', description: 'Parameters for the action' },
+              },
+              required: ['action'],
+            },
             description: 'Array of step objects with "action" and "params" fields',
           },
         },
