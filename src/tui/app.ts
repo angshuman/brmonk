@@ -1,6 +1,6 @@
 import * as crypto from 'node:crypto';
 import { Renderer } from './renderer.js';
-import { createInitialState, addSession, getActiveSession, addLogEntry, type AppState } from './state.js';
+import { createInitialState, addSession, getActiveSession, addLogEntry, type AppState, type SessionState } from './state.js';
 import { renderDashboard } from './views/dashboard.js';
 import { renderSession } from './views/session.js';
 import { renderInput } from './views/input.js';
@@ -199,11 +199,21 @@ export class TUIApp {
       }
       if (key === '\r') { // Enter — send message
         const msg = this.state.messageBuffer.trim();
-        if (msg && this.currentAgent) {
-          this.currentAgent.injectMessage(msg);
-          const session = getActiveSession(this.state);
-          if (session) {
-            addLogEntry(session, 'info', `You: ${msg}`);
+        if (msg) {
+          if (this.currentAgent) {
+            // Agent still running — inject mid-task
+            this.currentAgent.injectMessage(msg);
+            const session = getActiveSession(this.state);
+            if (session) {
+              addLogEntry(session, 'info', `You: ${msg}`);
+            }
+          } else {
+            // Agent finished — start a follow-up run
+            const session = getActiveSession(this.state);
+            if (session) {
+              addLogEntry(session, 'info', `You: ${msg}`);
+              this.startFollowUp(session, msg);
+            }
           }
         }
         this.state.messageInputMode = false;
@@ -353,6 +363,47 @@ export class TUIApp {
       this.currentAgent = null;
       this.scheduleRender();
     });
+  }
+
+  private startFollowUp(session: SessionState, message: string): void {
+    // Build context from previous task
+    const contextTask = `Context from previous task:\n` +
+      `Task: ${session.task}\n` +
+      `Result: ${session.result ?? 'No result'}\n\n` +
+      `User's follow-up request: ${message}`;
+
+    // Reuse the same session — don't create a new one
+    session.status = 'running';
+    session.currentAction = '';
+
+    this.currentAgent = new AgentLoop({
+      llm: this.llm,
+      browser: this.browser,
+      skillRegistry: this.skillRegistry,
+      memory: this.memory,
+      eventBus: this.eventBus,
+      maxSteps: this.maxSteps,
+    });
+
+    void this.currentAgent.run(contextTask).then(async (agentState) => {
+      session.status = agentState.status as typeof session.status;
+      session.result = agentState.result;
+      session.totalInputTokens += agentState.totalInputTokens;
+      session.totalOutputTokens += agentState.totalOutputTokens;
+      addLogEntry(session, agentState.status === 'completed' ? 'result' : 'error',
+        agentState.result ?? 'Follow-up ended');
+      await this.memory.saveSession(session.id, agentState.history, session.task);
+      this.currentAgent = null;
+      this.scheduleRender();
+    }).catch((err) => {
+      session.status = 'failed';
+      session.result = err instanceof Error ? err.message : String(err);
+      addLogEntry(session, 'error', session.result);
+      this.currentAgent = null;
+      this.scheduleRender();
+    });
+
+    this.scheduleRender();
   }
 
   private handleAgentEvent(event: AgentEvent): void {

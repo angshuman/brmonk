@@ -99,6 +99,8 @@ export function renderSession(renderer: Renderer, state: AppState): void {
   if (state.messageInputMode) {
     content.push(`  ${chalk.cyan('Message>')} ${state.messageBuffer}${chalk.gray('█')}`);
     content.push(chalk.gray('  [Enter] Send  [Esc] Cancel'));
+  } else if (session.status === 'completed' || session.status === 'failed') {
+    content.push(chalk.gray('  [m] Send follow-up  [b] Back'));
   } else {
     content.push(chalk.gray('  [m] Send message  [p] Pause/Resume  [s] Screenshot  [b] Back'));
   }

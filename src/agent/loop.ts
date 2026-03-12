@@ -262,6 +262,67 @@ export class AgentLoop {
       } catch {
         // No profile available
       }
+
+      // Add user documents summary
+      try {
+        const documents = await this.memory.getDocuments();
+        if (documents.length > 0) {
+          systemPrompt += '\n\n## User Documents\n';
+          systemPrompt += `You have access to ${documents.length} documents the user has imported:\n`;
+          for (const doc of documents) {
+            systemPrompt += `\n### ${doc.name} (${doc.type})\n`;
+            const truncated = doc.content.slice(0, 2000);
+            systemPrompt += truncated;
+            if (doc.content.length > 2000) {
+              systemPrompt += '\n... (truncated, use documents skill for full content)';
+            }
+            systemPrompt += '\n';
+          }
+        }
+      } catch {
+        // No documents
+      }
+
+      // Add tracked items summary
+      try {
+        const items = await this.memory.getItems();
+        if (items.length > 0) {
+          const collections = await this.memory.getCollections();
+          systemPrompt += '\n\n## Tracked Items\n';
+          systemPrompt += `The user has ${items.length} tracked items across ${collections.length} collection(s): ${collections.join(', ')}\n`;
+          const recent = items.slice(0, 10);
+          for (const item of recent) {
+            systemPrompt += `- [${item.status}] ${item.title} (${item.collection})`;
+            if (item.matchScore !== undefined) systemPrompt += ` — ${item.matchScore}% match`;
+            systemPrompt += '\n';
+          }
+          if (items.length > 10) {
+            systemPrompt += `... and ${items.length - 10} more. Use tracker skill to see all.\n`;
+          }
+        }
+      } catch {
+        // No items
+      }
+
+      // Add memory facts
+      try {
+        const factCategories = ['general', 'preferences', 'context'];
+        let hasFacts = false;
+        for (const cat of factCategories) {
+          const facts = await this.memory.getByCategory(cat);
+          if (facts.length > 0) {
+            if (!hasFacts) {
+              systemPrompt += '\n\n## Remembered Facts\n';
+              hasFacts = true;
+            }
+            for (const fact of facts.slice(0, 20)) {
+              systemPrompt += `- ${fact.key}: ${JSON.stringify(fact.value)}\n`;
+            }
+          }
+        }
+      } catch {
+        // No facts
+      }
     }
 
     // Add skill system prompts and tools (built-in + rich)
@@ -289,7 +350,47 @@ export class AgentLoop {
 
     // Build tools list
     const browserTools = getBrowserToolDefinitions();
-    const allTools = [...browserTools, ...skillTools];
+    const memoryTools: LLMToolDefinition[] = [];
+    if (this.memory) {
+      memoryTools.push(
+        {
+          name: 'rememberFact',
+          description: 'Store a fact about the user or task for future reference. Use this to remember preferences, important details, or anything the user tells you to remember.',
+          parameters: {
+            type: 'object',
+            properties: {
+              key: { type: 'string', description: 'Short key describing the fact (e.g., "preferred_language", "company_name")' },
+              value: { type: 'string', description: 'The fact to remember' },
+              category: { type: 'string', description: 'Category: general, preferences, context' },
+            },
+            required: ['key', 'value'],
+          },
+        },
+        {
+          name: 'recallFact',
+          description: 'Recall a previously stored fact by key',
+          parameters: {
+            type: 'object',
+            properties: {
+              key: { type: 'string', description: 'The fact key to recall' },
+            },
+            required: ['key'],
+          },
+        },
+        {
+          name: 'searchMemory',
+          description: 'Search through stored facts and memory',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: 'Search query' },
+            },
+            required: ['query'],
+          },
+        },
+      );
+    }
+    const allTools = [...browserTools, ...skillTools, ...memoryTools];
 
     // Main agent loop
     while (this.state.stepCount < this.state.maxSteps && this.state.status === 'running') {
@@ -312,16 +413,24 @@ export class AgentLoop {
         }
       }
 
-      // Pre-step: detect CAPTCHA
+      // Pre-step: detect CAPTCHA — try auto-solve first, fall back to user
       try {
         const hasCaptcha = await this.browser.detectCaptcha();
         if (hasCaptcha) {
-          logger.thought('CAPTCHA detected — waiting for user to solve it');
-          this.state.status = 'waiting-for-user';
-          this.eventBus?.emitUserActionRequired('CAPTCHA detected. Please solve the CAPTCHA in the browser window.', 'captcha');
-          await this.browser.waitForUserAction('Please solve the CAPTCHA in the browser window, then press Enter to continue.');
-          this.state.status = 'running';
-          this.eventBus?.emitStatus('running');
+          logger.thought('CAPTCHA detected — attempting auto-solve...');
+          this.eventBus?.emitThought('CAPTCHA detected, attempting to solve...');
+          const solved = await this.browser.attemptCaptchaSolve();
+          if (solved) {
+            logger.thought('CAPTCHA solved automatically');
+            this.eventBus?.emitThought('CAPTCHA solved automatically');
+          } else {
+            logger.thought('CAPTCHA requires manual solving');
+            this.state.status = 'waiting-for-user';
+            this.eventBus?.emitUserActionRequired('CAPTCHA detected. Please solve the CAPTCHA in the browser window.', 'captcha');
+            await this.browser.waitForUserAction('Please solve the CAPTCHA in the browser window, then press Enter to continue.');
+            this.state.status = 'running';
+            this.eventBus?.emitStatus('running');
+          }
         }
       } catch {
         // Detection failed, continue
@@ -442,9 +551,30 @@ export class AgentLoop {
         logger.tool(toolCall.name, toolCall.arguments);
         this.eventBus?.emitAction(toolCall.name, toolCall.arguments as Record<string, unknown>);
 
-        let result: string;
+        let result = '';
 
-        // Check rich skills first, then built-in skills, then browser actions
+        // Check memory tools first
+        if (toolCall.name === 'rememberFact' && this.memory) {
+          const args = toolCall.arguments as Record<string, unknown>;
+          await this.memory.remember(args['key'] as string, args['value'], args['category'] as string);
+          result = `Remembered: ${args['key']} = ${args['value']}`;
+        } else if (toolCall.name === 'recallFact' && this.memory) {
+          const args = toolCall.arguments as Record<string, unknown>;
+          const recalled = await this.memory.recall(args['key'] as string);
+          result = recalled ? `Recalled: ${JSON.stringify(recalled)}` : 'Nothing found for that key.';
+        } else if (toolCall.name === 'searchMemory' && this.memory) {
+          const args = toolCall.arguments as Record<string, unknown>;
+          const searchResults = await this.memory.search(args['query'] as string);
+          result = searchResults.length > 0
+            ? searchResults.map(r => `${r.key}: ${JSON.stringify(r.value)}`).join('\n')
+            : 'No matching memories found.';
+        }
+
+        // If memory tool handled it, skip to result reporting
+        if (result) {
+          // Already handled by memory tool
+        } else {
+        // Check rich skills, then built-in skills, then browser actions
         const richSkillHandler = this.skillRegistry?.findRichSkillForTool(toolCall.name);
         if (richSkillHandler && this.skillExecutor) {
           try {
@@ -478,6 +608,7 @@ export class AgentLoop {
             logger.action(`${toolCall.name}: ${result}`);
           }
         }
+        } // end of memory-tool else block
 
         this.eventBus?.emitActionResult(toolCall.name, result);
 

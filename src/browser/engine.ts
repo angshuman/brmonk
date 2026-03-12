@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import * as fs from 'node:fs/promises';
 import type { AgentEventBus } from '../events.js';
+import { randomDelay } from '../utils/helpers.js';
 
 export class BrowserEngine {
   private browser: Browser | null = null;
@@ -28,26 +29,85 @@ export class BrowserEngine {
   async launch(): Promise<void> {
     const contextOptions = {
       viewport: { width: 1280, height: 720 },
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      locale: 'en-US',
+      timezoneId: 'America/New_York',
+      deviceScaleFactor: 1,
+      hasTouch: false,
+      javaScriptEnabled: true,
+      extraHTTPHeaders: {
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
     };
+
+    const launchArgs = [
+      '--disable-blink-features=AutomationControlled',
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+    ];
 
     if (this.persistContext) {
       const dataDir = path.join(os.homedir(), '.brmonk', 'browser-data');
       await fs.mkdir(dataDir, { recursive: true });
       this.context = await chromium.launchPersistentContext(dataDir, {
         headless: this.headless,
+        args: launchArgs,
         ...contextOptions,
       });
       this.browser = null;
     } else {
-      this.browser = await chromium.launch({ headless: this.headless });
+      this.browser = await chromium.launch({ headless: this.headless, args: launchArgs });
       this.context = await this.browser.newContext(contextOptions);
     }
+
+    // Apply stealth scripts to evade bot detection
+    await this.applyStealthScripts();
 
     const page = await this.context.newPage();
     this.setupPage(page);
     this.pages = [page];
     this.activePageIndex = 0;
+  }
+
+  private async applyStealthScripts(): Promise<void> {
+    if (!this.context) return;
+
+    await this.context.addInitScript(() => {
+      // Hide webdriver flag
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+
+      // Override plugins to look like a real browser
+      Object.defineProperty(navigator, 'plugins', {
+        get: () => [1, 2, 3, 4, 5],
+      });
+
+      // Override languages
+      Object.defineProperty(navigator, 'languages', {
+        get: () => ['en-US', 'en'],
+      });
+
+      // Fix chrome object for headless detection
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).chrome = {
+        runtime: {},
+        loadTimes() { /* noop */ },
+        csi() { /* noop */ },
+        app: {},
+      };
+
+      // Override permissions query
+      const originalQuery = window.navigator.permissions.query;
+      window.navigator.permissions.query = (parameters: PermissionDescriptor) =>
+        parameters.name === 'notifications'
+          ? Promise.resolve({ state: Notification.permission } as PermissionStatus)
+          : originalQuery.call(window.navigator.permissions, parameters);
+
+      // Remove automation-related properties
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete (window as any).__playwright;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete (window as any).__pw_manual;
+    });
   }
 
   private setupPage(page: Page): void {
@@ -149,13 +209,38 @@ export class BrowserEngine {
       '[aria-label*="cookie" i]', '[aria-label*="consent" i]',
       '.cc-banner', '#onetrust-banner-sdk', '.gdpr-banner',
       '#CybotCookiebotDialog', '.cookie-notice', '#cookieNotice',
+      '#consent-banner', '.consent-banner', '#privacy-banner',
+      '.privacy-banner', '#sp-cc', '#sp_message_container',
+      '[class*="cookie-policy" i]', '[class*="cookie_consent" i]',
+      '.truste-consent-content', '#truste-consent-content',
+      '[data-testid*="cookie" i]', '[data-testid*="consent" i]',
+      '.qc-cmp-ui-container', '#qc-cmp-ui-container',
+      '#didomi-host', '.didomi-popup-container',
     ];
+
+    const acceptBtnSelectors = [
+      'button:has-text("Accept")',
+      'button:has-text("Accept All")',
+      'button:has-text("Accept Cookies")',
+      'button:has-text("I agree")',
+      'button:has-text("I Agree")',
+      'button:has-text("OK")',
+      'button:has-text("Got it")',
+      'button:has-text("Agree")',
+      'button:has-text("Allow")',
+      'button:has-text("Allow All")',
+      'button:has-text("Continue")',
+      'button:has-text("Confirm")',
+      '[class*="accept" i]',
+      '[class*="agree" i]',
+      '[data-testid*="accept" i]',
+    ].join(', ');
 
     for (const sel of cookieSelectors) {
       try {
         const el = await page.$(sel);
         if (el) {
-          const acceptBtn = await el.$('button:has-text("Accept"), button:has-text("Accept All"), button:has-text("I agree"), button:has-text("OK"), button:has-text("Got it"), [class*="accept" i]');
+          const acceptBtn = await el.$(acceptBtnSelectors);
           if (acceptBtn) {
             await acceptBtn.click();
             dismissed.push(`Cookie consent: clicked accept button`);
@@ -202,7 +287,79 @@ export class BrowserEngine {
       }
     }
 
+    // Fallback: hide cookie/consent banners via JS
+    try {
+      const hiddenByJs = await page.evaluate(() => {
+        const fixedElements = document.querySelectorAll('[style*="position: fixed"], [style*="position: sticky"]');
+        let count = 0;
+        for (const el of fixedElements) {
+          const rect = el.getBoundingClientRect();
+          const text = (el.textContent || '').toLowerCase();
+          if ((text.includes('cookie') || text.includes('consent') || text.includes('privacy') || text.includes('gdpr')) &&
+            (rect.height < 300)) {
+            (el as HTMLElement).style.display = 'none';
+            count++;
+          }
+        }
+        return count;
+      });
+      if (hiddenByJs > 0) {
+        dismissed.push(`Hid ${hiddenByJs} cookie/consent banner(s) via JS`);
+      }
+    } catch {
+      // page not ready
+    }
+
     return dismissed;
+  }
+
+  async attemptCaptchaSolve(): Promise<boolean> {
+    const page = this.currentPage();
+
+    // Try clicking reCAPTCHA checkbox
+    try {
+      const recaptchaFrame = page.frameLocator('iframe[src*="recaptcha"]');
+      const checkbox = recaptchaFrame.locator('.recaptcha-checkbox-border, #recaptcha-anchor');
+      if (await checkbox.isVisible({ timeout: 2000 })) {
+        await page.waitForTimeout(randomDelay(500, 1500));
+        await checkbox.click();
+        await page.waitForTimeout(3000);
+        const checked = await recaptchaFrame.locator('.recaptcha-checkbox-checked').isVisible({ timeout: 3000 }).catch(() => false);
+        if (checked) return true;
+      }
+    } catch {
+      // Not a simple checkbox captcha
+    }
+
+    // Try clicking hCaptcha checkbox
+    try {
+      const hcaptchaFrame = page.frameLocator('iframe[src*="hcaptcha"]');
+      const checkbox = hcaptchaFrame.locator('#checkbox');
+      if (await checkbox.isVisible({ timeout: 2000 })) {
+        await page.waitForTimeout(randomDelay(500, 1500));
+        await checkbox.click();
+        await page.waitForTimeout(3000);
+        return true;
+      }
+    } catch {
+      // Not a simple hCaptcha
+    }
+
+    // Try Cloudflare Turnstile
+    try {
+      const turnstileFrame = page.frameLocator('iframe[src*="turnstile"]');
+      const checkbox = turnstileFrame.locator('input[type="checkbox"]');
+      if (await checkbox.isVisible({ timeout: 2000 })) {
+        await page.waitForTimeout(randomDelay(500, 1500));
+        await checkbox.click();
+        await page.waitForTimeout(3000);
+        return true;
+      }
+    } catch {
+      // Not a simple turnstile
+    }
+
+    return false;
   }
 
   async detectCaptcha(): Promise<boolean> {

@@ -5,6 +5,7 @@ import type { LLMToolDefinition } from '../llm/types.js';
 import { extractDOM } from './dom.js';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { randomDelay } from '../utils/helpers.js';
 
 export interface ActionResult {
   success: boolean;
@@ -154,6 +155,8 @@ export class ActionExecutor {
 
   private async click(index: number): Promise<ActionResult> {
     const page = this.engine.currentPage();
+    // Human-like pre-click delay
+    await page.waitForTimeout(randomDelay(100, 400));
     await this.performOnElement(index, async (p, targetIndex, selectors) => {
       await p.evaluate(
         ({ sel, idx }) => {
@@ -177,7 +180,7 @@ export class ActionExecutor {
         { sel: selectors, idx: targetIndex }
       );
     });
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(randomDelay(300, 700));
     return { success: true, message: `Clicked element [${index}]` };
   }
 
@@ -207,7 +210,10 @@ export class ActionExecutor {
         { sel: selectors, idx: targetIndex }
       );
     });
-    await page.keyboard.type(text, { delay: 30 });
+    // Human-like typing with variable delays per character
+    for (const char of text) {
+      await page.keyboard.type(char, { delay: randomDelay(30, 120) });
+    }
     return { success: true, message: `Typed "${text}" into element [${index}]` };
   }
 
