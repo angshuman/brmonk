@@ -263,65 +263,37 @@ export class AgentLoop {
         // No profile available
       }
 
-      // Add user documents summary
+      // Add lightweight index of available data (not full content)
+      // The agent uses searchProfile tool to find relevant details on demand
       try {
         const documents = await this.memory.getDocuments();
-        if (documents.length > 0) {
-          systemPrompt += '\n\n## User Documents\n';
-          systemPrompt += `You have access to ${documents.length} documents the user has imported:\n`;
-          for (const doc of documents) {
-            systemPrompt += `\n### ${doc.name} (${doc.type})\n`;
-            const truncated = doc.content.slice(0, 2000);
-            systemPrompt += truncated;
-            if (doc.content.length > 2000) {
-              systemPrompt += '\n... (truncated, use documents skill for full content)';
-            }
-            systemPrompt += '\n';
-          }
-        }
-      } catch {
-        // No documents
-      }
-
-      // Add tracked items summary
-      try {
         const items = await this.memory.getItems();
-        if (items.length > 0) {
-          const collections = await this.memory.getCollections();
-          systemPrompt += '\n\n## Tracked Items\n';
-          systemPrompt += `The user has ${items.length} tracked items across ${collections.length} collection(s): ${collections.join(', ')}\n`;
-          const recent = items.slice(0, 10);
-          for (const item of recent) {
-            systemPrompt += `- [${item.status}] ${item.title} (${item.collection})`;
-            if (item.matchScore !== undefined) systemPrompt += ` — ${item.matchScore}% match`;
-            systemPrompt += '\n';
-          }
-          if (items.length > 10) {
-            systemPrompt += `... and ${items.length - 10} more. Use tracker skill to see all.\n`;
-          }
-        }
-      } catch {
-        // No items
-      }
-
-      // Add memory facts
-      try {
+        const collections = await this.memory.getCollections();
         const factCategories = ['general', 'preferences', 'context'];
-        let hasFacts = false;
+        let factCount = 0;
         for (const cat of factCategories) {
           const facts = await this.memory.getByCategory(cat);
-          if (facts.length > 0) {
-            if (!hasFacts) {
-              systemPrompt += '\n\n## Remembered Facts\n';
-              hasFacts = true;
+          factCount += facts.length;
+        }
+
+        if (documents.length > 0 || items.length > 0 || factCount > 0) {
+          systemPrompt += '\n\n## Available User Data\n';
+          systemPrompt += 'Use the searchProfile tool to find relevant information before answering questions about the user.\n';
+          if (documents.length > 0) {
+            systemPrompt += `\nDocuments (${documents.length}):\n`;
+            for (const doc of documents) {
+              systemPrompt += `- ${doc.name} (${doc.type})\n`;
             }
-            for (const fact of facts.slice(0, 20)) {
-              systemPrompt += `- ${fact.key}: ${JSON.stringify(fact.value)}\n`;
-            }
+          }
+          if (items.length > 0) {
+            systemPrompt += `\nTracked Items: ${items.length} across ${collections.length} collection(s): ${collections.join(', ')}\n`;
+          }
+          if (factCount > 0) {
+            systemPrompt += `\nRemembered Facts: ${factCount}\n`;
           }
         }
       } catch {
-        // No facts
+        // No data
       }
     }
 
@@ -384,6 +356,17 @@ export class AgentLoop {
             type: 'object',
             properties: {
               query: { type: 'string', description: 'Search query' },
+            },
+            required: ['query'],
+          },
+        },
+        {
+          name: 'searchProfile',
+          description: 'Search across all user data — profile, documents, tracked items, and memory facts. Returns only content matching the query. Use this to answer questions about the user, find relevant information from imported documents, or look up tracked items.',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: 'Search query — keywords or phrases to find in user data' },
             },
             required: ['query'],
           },
@@ -568,6 +551,25 @@ export class AgentLoop {
           result = searchResults.length > 0
             ? searchResults.map(r => `${r.key}: ${JSON.stringify(r.value)}`).join('\n')
             : 'No matching memories found.';
+        } else if (toolCall.name === 'searchProfile' && this.memory) {
+          const args = toolCall.arguments as Record<string, unknown>;
+          const searchResults = await this.memory.searchAll(args['query'] as string);
+          const parts: string[] = [];
+          if (searchResults.profile.length > 0) {
+            parts.push(`Profile:\n${searchResults.profile.join('\n')}`);
+          }
+          if (searchResults.documents.length > 0) {
+            for (const doc of searchResults.documents) {
+              parts.push(`Document "${doc.name}" (${doc.type}):\n${doc.snippets.join('\n')}`);
+            }
+          }
+          if (searchResults.items.length > 0) {
+            parts.push(`Tracked Items:\n${searchResults.items.map(i => `- [${i.status}] ${i.title} (${i.collection}) ${i.url}`).join('\n')}`);
+          }
+          if (searchResults.facts.length > 0) {
+            parts.push(`Memory Facts:\n${searchResults.facts.map(f => `- ${f.key}: ${JSON.stringify(f.value)}`).join('\n')}`);
+          }
+          result = parts.length > 0 ? parts.join('\n\n') : 'No matching information found in user data.';
         }
 
         // If memory tool handled it, skip to result reporting

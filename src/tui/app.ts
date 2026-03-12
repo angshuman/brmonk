@@ -74,17 +74,18 @@ export class TUIApp {
   private async loadProfileInfo(): Promise<void> {
     try {
       const profile = await this.memory.getProfile();
-      if (profile && profile.name) {
-        const items = await this.memory.getItems();
-        const documents = await this.memory.getDocuments();
-        const collections = await this.memory.getCollections();
-        this.state.profile = {
-          name: profile.name,
-          documentCount: documents.length,
-          itemCount: items.length,
-          collections,
-        };
-      }
+      const items = await this.memory.getItems();
+      const documents = await this.memory.getDocuments();
+      const collections = await this.memory.getCollections();
+      const paths = this.memory.getPaths();
+      this.state.profile = {
+        name: profile?.name ?? '(not set)',
+        documentCount: documents.length,
+        itemCount: items.length,
+        collections,
+        paths,
+        documentNames: documents.map(d => `${d.name} (${d.type})`),
+      };
     } catch {
       // No profile
     }

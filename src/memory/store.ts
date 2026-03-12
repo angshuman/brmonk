@@ -28,6 +28,27 @@ export class MemoryStore {
     this.profileFile = path.join(dir, 'profile.json');
   }
 
+  /** Return the base data directory and sub-paths for display. */
+  getPaths(): {
+    baseDir: string;
+    profileFile: string;
+    documentsDir: string;
+    itemsDir: string;
+    memoryDir: string;
+    sessionsDir: string;
+    skillsDir: string;
+  } {
+    return {
+      baseDir: this.dir,
+      profileFile: this.profileFile,
+      documentsDir: this.documentsDir,
+      itemsDir: this.itemsDir,
+      memoryDir: this.factsDir,
+      sessionsDir: this.sessionsDir,
+      skillsDir: path.join(this.dir, 'skills'),
+    };
+  }
+
   private async ensureDirs(): Promise<void> {
     await fs.mkdir(this.sessionsDir, { recursive: true });
     await fs.mkdir(this.factsDir, { recursive: true });
@@ -352,6 +373,80 @@ export class MemoryStore {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Search across profile, documents, items, and memory facts by keyword.
+   * Returns relevant snippets from each source without loading everything.
+   */
+  async searchAll(query: string): Promise<{
+    profile: string[];
+    documents: { name: string; type: string; snippets: string[] }[];
+    items: { title: string; collection: string; status: string; url: string }[];
+    facts: { key: string; value: unknown }[];
+  }> {
+    const lowerQuery = query.toLowerCase();
+    const result = {
+      profile: [] as string[],
+      documents: [] as { name: string; type: string; snippets: string[] }[],
+      items: [] as { title: string; collection: string; status: string; url: string }[],
+      facts: [] as { key: string; value: unknown }[],
+    };
+
+    // Search profile
+    try {
+      const profile = await this.getProfile();
+      if (profile) {
+        const profileStr = JSON.stringify(profile).toLowerCase();
+        if (profileStr.includes(lowerQuery)) {
+          if (profile.name?.toLowerCase().includes(lowerQuery)) result.profile.push(`Name: ${profile.name}`);
+          if (profile.email?.toLowerCase().includes(lowerQuery)) result.profile.push(`Email: ${profile.email}`);
+          if (profile.location?.toLowerCase().includes(lowerQuery)) result.profile.push(`Location: ${profile.location}`);
+          if (profile.summary?.toLowerCase().includes(lowerQuery)) result.profile.push(`Summary: ${profile.summary}`);
+          for (const [key, value] of Object.entries(profile.attributes ?? {})) {
+            if (`${key} ${JSON.stringify(value)}`.toLowerCase().includes(lowerQuery)) {
+              result.profile.push(`${key}: ${JSON.stringify(value)}`);
+            }
+          }
+        }
+      }
+    } catch { /* no profile */ }
+
+    // Search documents — return matching snippets (lines containing the query)
+    try {
+      const documents = await this.getDocuments();
+      for (const doc of documents) {
+        const searchable = `${doc.name} ${doc.type} ${doc.content}`.toLowerCase();
+        if (!searchable.includes(lowerQuery)) continue;
+        const lines = doc.content.split('\n');
+        const matchingLines: string[] = [];
+        for (const line of lines) {
+          if (line.toLowerCase().includes(lowerQuery)) {
+            matchingLines.push(line.trim().slice(0, 200));
+            if (matchingLines.length >= 5) break;
+          }
+        }
+        result.documents.push({ name: doc.name, type: doc.type, snippets: matchingLines });
+      }
+    } catch { /* no documents */ }
+
+    // Search tracked items
+    try {
+      const items = await this.getItems({ query });
+      for (const item of items.slice(0, 10)) {
+        result.items.push({ title: item.title, collection: item.collection, status: item.status, url: item.url });
+      }
+    } catch { /* no items */ }
+
+    // Search memory facts
+    try {
+      const facts = await this.search(query);
+      for (const fact of facts.slice(0, 10)) {
+        result.facts.push({ key: fact.key, value: fact.value });
+      }
+    } catch { /* no facts */ }
+
+    return result;
   }
 
   static hashTask(task: string): string {

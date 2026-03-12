@@ -25,7 +25,22 @@ export interface AppState {
   currentView: 'dashboard' | 'session' | 'input' | 'action-required' | 'profile';
   sessions: SessionState[];
   activeSessionIndex: number;
-  profile: { name: string; documentCount: number; itemCount: number; collections: string[] } | null;
+  profile: {
+    name: string;
+    documentCount: number;
+    itemCount: number;
+    collections: string[];
+    paths: {
+      baseDir: string;
+      profileFile: string;
+      documentsDir: string;
+      itemsDir: string;
+      memoryDir: string;
+      sessionsDir: string;
+      skillsDir: string;
+    };
+    documentNames: string[];
+  } | null;
   memoryCount: number;
   actionPrompt: string;
   actionType: 'login' | 'captcha' | 'confirmation';
