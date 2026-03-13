@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import * as crypto from 'node:crypto';
 import type { ActiveSession } from './server.js';
 import type { MemoryStore } from '../memory/store.js';
 import type { SkillRegistry } from '../skills/registry.js';
@@ -92,7 +93,7 @@ export function createApiRouter(
         const results = await memory.search(query);
         return res.json(results);
       }
-      // Return all facts by category
+      // Return all facts by category, each entry includes key field
       const categories = ['general', 'preferences', 'context'];
       const all: Record<string, unknown[]> = {};
       for (const cat of categories) {
@@ -108,6 +109,47 @@ export function createApiRouter(
     try {
       const docs = await memory.getDocuments();
       res.json(docs);
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  router.post('/memory/documents', async (req, res) => {
+    try {
+      const { name, type, content } = req.body as { name: string; type: string; content: string };
+      const id = crypto.randomUUID().slice(0, 8);
+      await memory.saveDocument({ id, name, type, content, updatedAt: Date.now() });
+      res.json({ ok: true, id });
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  router.delete('/memory/documents/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      await memory.deleteDocument(id!);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  router.post('/memory/notes', async (req, res) => {
+    try {
+      const { key, value, category } = req.body as { key: string; value: string; category?: string };
+      await memory.remember(key, value, category);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  router.delete('/memory/notes/:key', async (req, res) => {
+    try {
+      const { key } = req.params;
+      await memory.forget(key!);
+      res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: String(err) });
     }

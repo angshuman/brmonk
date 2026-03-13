@@ -46,6 +46,21 @@ export interface UserProfile {
   attributes?: Record<string, unknown>;
 }
 
+export interface UserDocument {
+  id: string;
+  name: string;
+  type: string;
+  content: string;
+  updatedAt: number;
+}
+
+export interface MemoryEntry {
+  key: string;
+  value: unknown;
+  category?: string;
+  timestamp?: number;
+}
+
 export interface SkillInfo {
   name: string;
   description: string;

@@ -359,6 +359,30 @@ export class MemoryStore {
     return results;
   }
 
+  async forget(key: string): Promise<void> {
+    await this.ensureDirs();
+    try {
+      const files = await fs.readdir(this.factsDir);
+      for (const file of files) {
+        if (!file.endsWith('.json')) continue;
+        try {
+          const filePath = path.join(this.factsDir, file);
+          const data = await fs.readFile(filePath, 'utf-8');
+          const facts = JSON.parse(data) as Record<string, MemoryFact>;
+          if (key in facts) {
+            delete facts[key];
+            await fs.writeFile(filePath, JSON.stringify(facts, null, 2), 'utf-8');
+            return;
+          }
+        } catch {
+          continue;
+        }
+      }
+    } catch {
+      // no facts dir
+    }
+  }
+
   async getByCategory(category: string): Promise<MemoryEntry[]> {
     await this.ensureDirs();
     const catFile = path.join(this.factsDir, `${category}.json`);
