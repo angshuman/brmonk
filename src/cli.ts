@@ -1040,6 +1040,21 @@ docsCmd
     }
   });
 
+program
+  .command('web')
+  .description('Start the web interface')
+  .option('-p, --port <port>', 'Port number', '3333')
+  .action(async (opts: Record<string, unknown>) => {
+    try {
+      const { startWebServer } = await import('./web/server.js');
+      const port = parseInt(String(opts['port']), 10);
+      await startWebServer(port);
+    } catch (err) {
+      logger.error(err instanceof Error ? err.message : String(err));
+      process.exitCode = 1;
+    }
+  });
+
 const configCmd = program
   .command('config')
   .description('Manage configuration');
