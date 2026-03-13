@@ -6,6 +6,7 @@ import { SessionView } from './components/SessionView';
 import { ProfileView } from './components/ProfileView';
 import { ItemsView } from './components/ItemsView';
 import { SettingsView, SkillsView } from './components/SettingsView';
+import { BrowserViewportToggle } from './components/BrowserViewport';
 import { Sun, Moon, Wifi, WifiOff } from 'lucide-react';
 
 export default function App() {
@@ -39,6 +40,7 @@ export default function App() {
               <><WifiOff size={12} className="text-error" /><span className="text-error">Disconnected</span></>
             )}
           </div>
+          {currentView === 'session' && <BrowserViewportToggle />}
           <button
             onClick={toggleTheme}
             className="p-1.5 rounded hover:bg-surface-elevated transition-colors text-muted"

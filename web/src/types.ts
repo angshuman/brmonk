@@ -34,7 +34,14 @@ export type AgentEvent =
   | { type: 'user-action-resolved'; sessionId: string }
   | { type: 'popup-dismissed'; sessionId: string; description: string }
   | { type: 'page-navigated'; sessionId: string; url: string }
-  | { type: 'session-result'; sessionId: string; sessionResult: unknown };
+  | { type: 'session-result'; sessionId: string; sessionResult: unknown }
+  | { type: 'browser-screenshot'; sessionId: string; data: string; url: string; timestamp: number };
+
+export interface BrowserScreenshot {
+  data: string;
+  url: string;
+  timestamp: number;
+}
 
 export type ServerMessage =
   | { type: 'session-created'; sessionId: string; task: string }

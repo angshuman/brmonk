@@ -15,7 +15,8 @@ export type AgentEvent =
   | { type: 'user-action-resolved'; sessionId: string }
   | { type: 'popup-dismissed'; sessionId: string; description: string }
   | { type: 'page-navigated'; sessionId: string; url: string }
-  | { type: 'session-result'; sessionId: string; sessionResult: SessionResult };
+  | { type: 'session-result'; sessionId: string; sessionResult: SessionResult }
+  | { type: 'browser-screenshot'; sessionId: string; data: string; url: string; timestamp: number };
 
 export class AgentEventBus extends EventEmitter {
   private sessionId: string;
@@ -101,5 +102,9 @@ export class AgentEventBus extends EventEmitter {
 
   emitSessionResult(sessionResult: SessionResult): void {
     this.emitEvent({ type: 'session-result', sessionId: this.sessionId, sessionResult });
+  }
+
+  emitBrowserScreenshot(data: string, url: string): void {
+    this.emitEvent({ type: 'browser-screenshot', sessionId: this.sessionId, data, url, timestamp: Date.now() });
   }
 }
