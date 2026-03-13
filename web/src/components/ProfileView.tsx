@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   User, FileText, Brain, Plus, Trash2, Upload, Save, X, Check,
+  ChevronDown, ChevronRight, Eye,
 } from 'lucide-react';
+import clsx from 'clsx';
 import type { UserProfile, UserDocument, MemoryEntry } from '../types';
 
 // ─── Profile Section ────────────────────────────────────────────────────────────────────────────
@@ -352,27 +354,57 @@ function DocumentsSection({ docs, onRefresh }: DocumentsSectionProps) {
       ) : (
         <div className="space-y-2">
           {docs.map(doc => (
-            <div key={doc.id} className="bg-surface rounded-lg border border-border p-3 flex items-center gap-3">
-              <FileText size={16} className="text-muted flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm text-primary truncate">{doc.name}</p>
-                <p className="text-xs text-muted">
-                  {doc.type} · {formatSize(doc.content)} · {new Date(doc.updatedAt).toLocaleDateString()}
-                </p>
-              </div>
-              <button
-                onClick={() => handleDelete(doc.id)}
-                disabled={deletingId === doc.id}
-                className="text-error hover:bg-error/10 rounded p-1.5 transition-colors flex-shrink-0 disabled:opacity-40"
-                title="Delete document"
-              >
-                <Trash2 size={14} />
-              </button>
-            </div>
+            <DocumentCard key={doc.id} doc={doc} formatSize={formatSize} onDelete={handleDelete} deletingId={deletingId} />
           ))}
         </div>
       )}
     </section>
+  );
+}
+
+function DocumentCard({ doc, formatSize, onDelete, deletingId }: {
+  doc: UserDocument; formatSize: (s: string) => string;
+  onDelete: (id: string) => void; deletingId: string | null;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="bg-surface rounded-lg border border-border">
+      <div className="p-3 flex items-center gap-3">
+        <button onClick={() => setExpanded(!expanded)} className="text-muted hover:text-primary flex-shrink-0">
+          {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        </button>
+        <FileText size={16} className="text-muted flex-shrink-0" />
+        <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setExpanded(!expanded)}>
+          <p className="text-sm text-primary truncate">{doc.name}</p>
+          <p className="text-xs text-muted">
+            {doc.type} · {formatSize(doc.content)} · {new Date(doc.updatedAt).toLocaleDateString()}
+          </p>
+        </div>
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="text-muted hover:text-primary p-1 flex-shrink-0"
+          title="View content"
+        >
+          <Eye size={14} />
+        </button>
+        <button
+          onClick={() => onDelete(doc.id)}
+          disabled={deletingId === doc.id}
+          className="text-error hover:bg-error/10 rounded p-1.5 transition-colors flex-shrink-0 disabled:opacity-40"
+          title="Delete document"
+        >
+          <Trash2 size={14} />
+        </button>
+      </div>
+      {expanded && (
+        <div className="border-t border-border px-4 py-3">
+          <pre className="text-xs text-secondary whitespace-pre-wrap break-words max-h-80 overflow-y-auto font-mono leading-relaxed">
+            {doc.content}
+          </pre>
+        </div>
+      )}
+    </div>
   );
 }
 

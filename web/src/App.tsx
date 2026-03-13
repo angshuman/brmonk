@@ -4,6 +4,7 @@ import { useTheme } from './hooks/useTheme';
 import { Sidebar } from './components/Sidebar';
 import { SessionView } from './components/SessionView';
 import { ProfileView } from './components/ProfileView';
+import { ItemsView } from './components/ItemsView';
 import { SettingsView, SkillsView } from './components/SettingsView';
 import { Sun, Moon, Wifi, WifiOff } from 'lucide-react';
 
@@ -18,6 +19,7 @@ export default function App() {
   const renderMain = () => {
     switch (currentView) {
       case 'profile': return <ProfileView />;
+      case 'items': return <ItemsView />;
       case 'skills': return <SkillsView />;
       case 'settings': return <SettingsView />;
       default: return <SessionView />;
