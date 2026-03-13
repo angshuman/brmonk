@@ -12,7 +12,7 @@ interface AppStore {
 
   // UI State
   sidebarOpen: boolean;
-  currentView: 'session' | 'profile' | 'skills' | 'settings';
+  currentView: 'session' | 'profile' | 'items' | 'skills' | 'settings';
   autoScroll: boolean;
 
   // WebSocket
@@ -27,7 +27,7 @@ interface AppStore {
   resolveUserAction: () => void;
   stopSession: () => void;
   addEvent: (sessionId: string, event: AgentEvent) => void;
-  setView: (view: 'session' | 'profile' | 'skills' | 'settings') => void;
+  setView: (view: 'session' | 'profile' | 'items' | 'skills' | 'settings') => void;
   toggleSidebar: () => void;
   setAutoScroll: (val: boolean) => void;
   fetchSessions: () => Promise<void>;

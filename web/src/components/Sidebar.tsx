@@ -1,5 +1,5 @@
 import { useAppStore } from '../hooks/useSession';
-import { Plus, User, Puzzle, Settings, Menu, X } from 'lucide-react';
+import { Plus, User, Puzzle, Settings, Menu, X, Package } from 'lucide-react';
 import clsx from 'clsx';
 
 function statusColor(status: string): string {
@@ -116,6 +116,7 @@ export function Sidebar() {
         <div className="border-t border-border p-2 space-y-0.5">
           {([
             ['profile', User, 'Profile'],
+            ['items', Package, 'Items'],
             ['skills', Puzzle, 'Skills'],
             ['settings', Settings, 'Settings'],
           ] as const).map(([view, Icon, label]) => (

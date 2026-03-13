@@ -14,6 +14,10 @@ export interface StoredSession {
   completedAt?: number;
   result?: string;
   stepCount?: number;
+  steps?: number;
+  toolsUsed?: string[];
+  urls?: string[];
+  summary?: string;
 }
 
 export type AgentEvent =
@@ -66,6 +70,31 @@ export interface SkillInfo {
   description: string;
   version: string;
   type: 'builtin' | 'user-defined';
-  tools: string[];
+  tools: { name: string; description: string }[];
   tags?: string[];
+  author?: string;
+  instructions?: string;
+  actions?: { name: string; steps: string[] }[];
+  env?: { required?: string[]; optional?: string[] };
+  systemPrompt?: string;
+  directory?: string;
+}
+
+export interface TrackedItem {
+  id: string;
+  collection: string;
+  title: string;
+  url: string;
+  createdAt: number;
+  updatedAt: number;
+  status: 'new' | 'saved' | 'applied' | 'rejected' | 'archived';
+  matchScore?: number;
+  notes?: string;
+  fields: Record<string, unknown>;
+  tags: string[];
+}
+
+export interface CollectionInfo {
+  name: string;
+  count: number;
 }
