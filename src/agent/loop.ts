@@ -108,6 +108,8 @@ export class AgentLoop {
   private startedAt = '';
   private toolsUsedSet = new Set<string>();
   private urlsVisited = new Set<string>();
+  private lastScreenshotTime = 0;
+  private screenshotInterval = 2000; // minimum ms between screenshots
 
   constructor(options: {
     llm: LLMProvider;
@@ -534,6 +536,11 @@ export class AgentLoop {
         }
       }
 
+      // Capture screenshot after observing page state (skip in MCP mode — no direct browser access)
+      if (!this.mcpEngine) {
+        await this.captureScreenshot();
+      }
+
       // Add observation to messages
       this.messages.push({
         role: 'user',
@@ -721,6 +728,11 @@ export class AgentLoop {
         }
       }
 
+      // Capture screenshot after tool execution (skip in MCP mode)
+      if (!this.mcpEngine && response.toolCalls.length > 0 && this.state.status === 'running') {
+        await this.captureScreenshot();
+      }
+
       // Add batched tool results as a single user message
       if (toolResults.length > 0) {
         this.messages.push({
@@ -778,6 +790,23 @@ export class AgentLoop {
     }
 
     return this.getState();
+  }
+
+  private async captureScreenshot(): Promise<void> {
+    if (!this.eventBus) return;
+    const now = Date.now();
+    if (now - this.lastScreenshotTime < this.screenshotInterval) return;
+    this.lastScreenshotTime = now;
+
+    try {
+      const data = await this.browser.screenshotToBase64();
+      if (data) {
+        const url = this.browser.getCurrentUrl();
+        this.eventBus.emitBrowserScreenshot(data, url);
+      }
+    } catch {
+      // Non-critical
+    }
   }
 
   private findSkillForTool(toolName: string): Skill | null {
