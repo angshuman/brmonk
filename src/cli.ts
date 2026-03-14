@@ -17,6 +17,39 @@ import { AgentEventBus } from './events.js';
 import { TUIApp } from './tui/app.js';
 import { logger, setVerbose } from './utils/logger.js';
 
+/** Initialize browser + MCP engine based on config backend setting */
+async function initBrowserBackend(config: Config): Promise<{ browser: BrowserEngine; mcpEngine?: McpBrowserEngine }> {
+  let browser: BrowserEngine;
+  let mcpEngine: McpBrowserEngine | undefined;
+
+  if (config.browserBackend === 'remote-cdp') {
+    const cdpUrl = config.remoteBrowser.cdpUrl;
+    if (!cdpUrl) throw new Error('BRMONK_CDP_URL is required for remote-cdp backend');
+    browser = new BrowserEngine(config.headless, config.persistBrowserContext, cdpUrl);
+    logger.info(`Using remote CDP browser at ${cdpUrl}`);
+  } else if (config.browserBackend === 'remote-mcp') {
+    const mcpUrl = config.remoteBrowser.mcpUrl;
+    if (!mcpUrl) throw new Error('BRMONK_MCP_URL is required for remote-mcp backend');
+    browser = new BrowserEngine(config.headless, config.persistBrowserContext);
+    mcpEngine = new McpBrowserEngine(config.headless, config.mcpBrowser, mcpUrl);
+    await mcpEngine.initialize();
+    logger.info(`Using remote MCP browser at ${mcpUrl}`);
+  } else if (config.browserBackend === 'playwright-mcp') {
+    browser = new BrowserEngine(config.headless, config.persistBrowserContext);
+    mcpEngine = new McpBrowserEngine(config.headless, config.mcpBrowser);
+    await mcpEngine.initialize();
+  } else {
+    browser = new BrowserEngine(config.headless, config.persistBrowserContext);
+  }
+
+  // Launch browser (skip for remote-mcp — MCP server manages its own browser)
+  if (config.browserBackend !== 'remote-mcp') {
+    await browser.launch();
+  }
+
+  return { browser, mcpEngine };
+}
+
 const program = new Command();
 
 program
@@ -28,18 +61,12 @@ program
     try {
       const config = await loadConfig();
       const provider = createProvider(config.provider, config.model || undefined);
-      const browser = new BrowserEngine(config.headless, config.persistBrowserContext);
       const skillRegistry = new SkillRegistry();
       const memory = new MemoryStore(config.memoryDir);
 
-      let mcpEngine: McpBrowserEngine | undefined;
-      if (config.browserBackend === 'playwright-mcp') {
-        mcpEngine = new McpBrowserEngine(config.headless, config.mcpBrowser);
-        await mcpEngine.initialize();
-      }
+      const { browser, mcpEngine } = await initBrowserBackend(config);
 
       await skillRegistry.loadFromDirectory(config.skillsDir);
-      await browser.launch();
 
       const cleanup = async (): Promise<void> => {
         if (mcpEngine) await mcpEngine.close();
@@ -90,22 +117,14 @@ program
       if (config.verbose) setVerbose(true);
 
       const provider = createProvider(config.provider, config.model || undefined);
-      const browser = new BrowserEngine(config.headless, config.persistBrowserContext);
       const skillRegistry = new SkillRegistry();
       const memory = new MemoryStore(config.memoryDir);
       const eventBus = new AgentEventBus();
 
-      let mcpEngine: McpBrowserEngine | undefined;
-      if (config.browserBackend === 'playwright-mcp') {
-        mcpEngine = new McpBrowserEngine(config.headless, config.mcpBrowser);
-        await mcpEngine.initialize();
-      }
+      const { browser, mcpEngine } = await initBrowserBackend(config);
 
       // Load user skills
       await skillRegistry.loadFromDirectory(config.skillsDir);
-
-      // Launch browser
-      await browser.launch();
 
       // Setup graceful shutdown
       const cleanup = async (): Promise<void> => {
@@ -171,19 +190,13 @@ program
       if (config.verbose) setVerbose(true);
 
       const provider = createProvider(config.provider, config.model || undefined);
-      const browser = new BrowserEngine(config.headless, config.persistBrowserContext);
       const skillRegistry = new SkillRegistry();
       const memory = new MemoryStore(config.memoryDir);
       const eventBus = new AgentEventBus();
 
-      let mcpEngine: McpBrowserEngine | undefined;
-      if (config.browserBackend === 'playwright-mcp') {
-        mcpEngine = new McpBrowserEngine(config.headless, config.mcpBrowser);
-        await mcpEngine.initialize();
-      }
+      const { browser, mcpEngine } = await initBrowserBackend(config);
 
       await skillRegistry.loadFromDirectory(config.skillsDir);
-      await browser.launch();
 
       const cleanup = async (): Promise<void> => {
         logger.info('Shutting down...');
