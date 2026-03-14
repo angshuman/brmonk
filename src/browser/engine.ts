@@ -16,10 +16,12 @@ export class BrowserEngine {
   private authenticatedDomains: Set<string> = new Set();
   private userActionResolver: (() => void) | null = null;
   private lastDismissedUrl = '';
+  private cdpUrl: string | null = null;
 
-  constructor(headless = false, persistContext = true) {
+  constructor(headless = false, persistContext = true, cdpUrl?: string) {
     this.headless = headless;
     this.persistContext = persistContext;
+    this.cdpUrl = cdpUrl ?? null;
   }
 
   setEventBus(bus: AgentEventBus): void {
@@ -27,6 +29,26 @@ export class BrowserEngine {
   }
 
   async launch(): Promise<void> {
+    // Remote CDP mode: connect to an existing browser on the host
+    if (this.cdpUrl) {
+      this.browser = await chromium.connectOverCDP(this.cdpUrl);
+      const contexts = this.browser.contexts();
+      this.context = contexts[0] ?? await this.browser.newContext();
+      const existingPages = this.context.pages();
+      if (existingPages.length > 0) {
+        this.pages = existingPages;
+        for (const page of this.pages) {
+          this.setupPage(page);
+        }
+      } else {
+        const page = await this.context.newPage();
+        this.setupPage(page);
+        this.pages = [page];
+      }
+      this.activePageIndex = 0;
+      return;
+    }
+
     const contextOptions = {
       viewport: { width: 1280, height: 720 },
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',

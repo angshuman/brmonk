@@ -11,6 +11,11 @@ export interface McpBrowserConfig {
   extraArgs?: string[];   // any additional CLI args
 }
 
+export interface RemoteBrowserConfig {
+  cdpUrl?: string;        // e.g. 'http://host.docker.internal:9222'
+  mcpUrl?: string;        // e.g. 'http://host.docker.internal:3100/sse'
+}
+
 export interface Config {
   provider: 'claude' | 'openai' | 'grok' | 'auto';
   model: string;
@@ -25,8 +30,9 @@ export interface Config {
   pauseOnCaptcha: boolean;
   pauseOnLogin: boolean;
   persistBrowserContext: boolean;
-  browserBackend: 'playwright' | 'playwright-mcp';
+  browserBackend: 'playwright' | 'playwright-mcp' | 'remote-cdp' | 'remote-mcp';
   mcpBrowser: McpBrowserConfig;
+  remoteBrowser: RemoteBrowserConfig;
 }
 
 const DEFAULTS: Config = {
@@ -48,6 +54,7 @@ const DEFAULTS: Config = {
     browser: 'chrome',
     isolated: false,
   },
+  remoteBrowser: {},
 };
 
 export async function loadConfig(cliOverrides?: Partial<Config>): Promise<Config> {
@@ -70,6 +77,19 @@ export async function loadConfig(cliOverrides?: Partial<Config>): Promise<Config
   if (process.env['BRMONK_HEADLESS'] !== undefined) envConfig.headless = process.env['BRMONK_HEADLESS'] !== 'false';
   if (process.env['BRMONK_MEMORY_DIR']) envConfig.memoryDir = expandHome(process.env['BRMONK_MEMORY_DIR']);
   if (process.env['BRMONK_SKILLS_DIR']) envConfig.skillsDir = expandHome(process.env['BRMONK_SKILLS_DIR']);
+  if (process.env['BRMONK_BROWSER_BACKEND']) envConfig.browserBackend = process.env['BRMONK_BROWSER_BACKEND'] as Config['browserBackend'];
+  if (process.env['BRMONK_CDP_URL'] || process.env['BRMONK_MCP_URL']) {
+    envConfig.remoteBrowser = {
+      cdpUrl: process.env['BRMONK_CDP_URL'],
+      mcpUrl: process.env['BRMONK_MCP_URL'],
+    };
+    // Auto-set browser backend from env
+    if (process.env['BRMONK_CDP_URL'] && !process.env['BRMONK_BROWSER_BACKEND']) {
+      envConfig.browserBackend = 'remote-cdp';
+    } else if (process.env['BRMONK_MCP_URL'] && !process.env['BRMONK_BROWSER_BACKEND']) {
+      envConfig.browserBackend = 'remote-mcp';
+    }
+  }
 
   // Merge: defaults < file < env < CLI
   return {

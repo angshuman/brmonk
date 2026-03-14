@@ -39,18 +39,45 @@ interface WsMessage {
 export async function startWebServer(port: number): Promise<void> {
   const config = await loadConfig();
   const provider = createProvider(config.provider, config.model || undefined);
-  const browser = new BrowserEngine(config.headless, config.persistBrowserContext);
   const skillRegistry = new SkillRegistry();
   const memory = new MemoryStore(config.memoryDir);
 
+  // Initialize browser engine based on backend configuration
+  const isRemote = config.browserBackend === 'remote-cdp' || config.browserBackend === 'remote-mcp';
+  let browser: BrowserEngine;
   let mcpEngine: McpBrowserEngine | undefined;
-  if (config.browserBackend === 'playwright-mcp') {
+
+  if (config.browserBackend === 'remote-cdp') {
+    // Remote CDP: connect to browser on host via Chrome DevTools Protocol
+    const cdpUrl = config.remoteBrowser.cdpUrl;
+    if (!cdpUrl) throw new Error('BRMONK_CDP_URL is required for remote-cdp backend');
+    browser = new BrowserEngine(config.headless, config.persistBrowserContext, cdpUrl);
+    logger.info(`Using remote CDP browser at ${cdpUrl}`);
+  } else if (config.browserBackend === 'remote-mcp') {
+    // Remote MCP: connect to Playwright MCP server on host via HTTP
+    const mcpUrl = config.remoteBrowser.mcpUrl;
+    if (!mcpUrl) throw new Error('BRMONK_MCP_URL is required for remote-mcp backend');
+    browser = new BrowserEngine(config.headless, config.persistBrowserContext); // dummy, not launched
+    mcpEngine = new McpBrowserEngine(config.headless, config.mcpBrowser, mcpUrl);
+    await mcpEngine.initialize();
+    logger.info(`Using remote MCP browser at ${mcpUrl}`);
+  } else if (config.browserBackend === 'playwright-mcp') {
+    // Local MCP: spawn Playwright MCP server via stdio
+    browser = new BrowserEngine(config.headless, config.persistBrowserContext);
     mcpEngine = new McpBrowserEngine(config.headless, config.mcpBrowser);
     await mcpEngine.initialize();
+  } else {
+    // Default: direct Playwright
+    browser = new BrowserEngine(config.headless, config.persistBrowserContext);
   }
 
   await skillRegistry.loadFromDirectory(config.skillsDir);
-  await browser.launch();
+
+  // Only launch local browser for non-remote-MCP backends
+  // (remote-cdp connects in launch(), local playwright needs launch(), remote-mcp doesn't need it)
+  if (config.browserBackend !== 'remote-mcp') {
+    await browser.launch();
+  }
 
   const sessions = new Map<string, ActiveSession>();
   const wsClients = new Map<WebSocket, string | null>(); // ws → subscribed sessionId

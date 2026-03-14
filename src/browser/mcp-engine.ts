@@ -1,5 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import type { McpBrowserConfig } from '../config.js';
 import type { LLMToolDefinition } from '../llm/types.js';
 import { logger } from '../utils/logger.js';
@@ -11,17 +13,69 @@ export interface McpToolResult {
 
 export class McpBrowserEngine {
   private client: Client | null = null;
-  private transport: StdioClientTransport | null = null;
+  private transport: StdioClientTransport | StreamableHTTPClientTransport | SSEClientTransport | null = null;
   private tools: LLMToolDefinition[] = [];
   private headless: boolean;
   private mcpConfig: McpBrowserConfig;
+  private remoteUrl: string | null = null;
 
-  constructor(headless: boolean, mcpConfig: McpBrowserConfig) {
+  constructor(headless: boolean, mcpConfig: McpBrowserConfig, remoteUrl?: string) {
     this.headless = headless;
     this.mcpConfig = mcpConfig;
+    this.remoteUrl = remoteUrl ?? null;
   }
 
   async initialize(): Promise<void> {
+    if (this.remoteUrl) {
+      // Remote MCP mode: connect to a host-running Playwright MCP server via HTTP
+      await this.initializeRemote(this.remoteUrl);
+    } else {
+      // Local MCP mode: spawn Playwright MCP via stdio
+      await this.initializeLocal();
+    }
+
+    // Discover available tools
+    if (!this.client) throw new Error('MCP client not initialized');
+    const toolsResult = await this.client.listTools();
+    this.tools = toolsResult.tools.map(tool => ({
+      name: tool.name,
+      description: tool.description ?? '',
+      parameters: (tool.inputSchema ?? { type: 'object', properties: {} }) as Record<string, unknown>,
+    }));
+
+    logger.info(`MCP browser engine ready with ${this.tools.length} tools`);
+  }
+
+  private async initializeRemote(url: string): Promise<void> {
+    const parsed = new URL(url);
+
+    // Try Streamable HTTP first (modern MCP), fall back to SSE (legacy)
+    this.client = new Client(
+      { name: 'brmonk', version: '1.0.0' },
+      { capabilities: {} },
+    );
+
+    try {
+      logger.info(`Connecting to remote MCP server via Streamable HTTP: ${url}`);
+      const transport = new StreamableHTTPClientTransport(parsed);
+      await this.client.connect(transport);
+      this.transport = transport;
+      logger.info('Connected via Streamable HTTP transport');
+    } catch {
+      // Streamable HTTP failed — try SSE fallback
+      logger.info('Streamable HTTP failed, trying SSE transport...');
+      this.client = new Client(
+        { name: 'brmonk', version: '1.0.0' },
+        { capabilities: {} },
+      );
+      const sseTransport = new SSEClientTransport(parsed);
+      await this.client.connect(sseTransport);
+      this.transport = sseTransport;
+      logger.info('Connected via SSE transport');
+    }
+  }
+
+  private async initializeLocal(): Promise<void> {
     const args = ['@playwright/mcp@latest'];
 
     if (this.headless) {
@@ -57,17 +111,7 @@ export class McpBrowserEngine {
     );
 
     await this.client.connect(this.transport);
-    logger.info('MCP browser engine connected');
-
-    // Discover available tools
-    const toolsResult = await this.client.listTools();
-    this.tools = toolsResult.tools.map(tool => ({
-      name: tool.name,
-      description: tool.description ?? '',
-      parameters: (tool.inputSchema ?? { type: 'object', properties: {} }) as Record<string, unknown>,
-    }));
-
-    logger.info(`MCP browser engine ready with ${this.tools.length} tools`);
+    logger.info('MCP browser engine connected (stdio)');
   }
 
   getTools(): LLMToolDefinition[] {
