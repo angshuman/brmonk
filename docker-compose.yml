@@ -1,0 +1,58 @@
+# brmonk Docker Compose
+#
+# The browser runs on your HOST machine. brmonk in Docker connects to it.
+#
+# QUICK START:
+#
+#   Option A — Remote CDP (recommended, full screenshot support):
+#     1. On your host, start Chrome with remote debugging:
+#          ./scripts/start-browser.sh          (macOS/Linux)
+#          .\scripts\start-browser.ps1         (Windows)
+#     2. docker compose --profile cdp up
+#
+#   Option B — Remote MCP (Playwright MCP over HTTP):
+#     1. On your host, start the Playwright MCP server:
+#          npx @playwright/mcp@latest --port 3100
+#     2. docker compose --profile mcp up
+#
+# Data is persisted in a Docker volume (brmonk-data).
+
+services:
+  brmonk-cdp:
+    build: .
+    profiles: ["cdp"]
+    ports:
+      - "3333:3333"
+    volumes:
+      - brmonk-data:/data
+    environment:
+      - BRMONK_BROWSER_BACKEND=remote-cdp
+      - BRMONK_CDP_URL=http://host.docker.internal:9222
+      - BRMONK_MEMORY_DIR=/data
+      - BRMONK_SKILLS_DIR=/data/skills
+      - BRMONK_HEADLESS=true
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  brmonk-mcp:
+    build: .
+    profiles: ["mcp"]
+    ports:
+      - "3333:3333"
+    volumes:
+      - brmonk-data:/data
+    environment:
+      - BRMONK_BROWSER_BACKEND=remote-mcp
+      - BRMONK_MCP_URL=http://host.docker.internal:3100/mcp
+      - BRMONK_MEMORY_DIR=/data
+      - BRMONK_SKILLS_DIR=/data/skills
+      - BRMONK_HEADLESS=true
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  brmonk-data:
