@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { AgentEvent, SessionSummary, StoredSession } from '../types';
+import type { AgentEvent, SessionSummary, StoredSession, BrowserScreenshot } from '../types';
 import { BrmonkWebSocket } from '../lib/ws';
 
 interface AppStore {
@@ -9,6 +9,10 @@ interface AppStore {
   activeSessionId: string | null;
   sessionEvents: Map<string, AgentEvent[]>;
   sessionStatuses: Map<string, string>;
+
+  // Browser viewport
+  browserScreenshots: Map<string, BrowserScreenshot>;
+  browserViewportVisible: boolean;
 
   // UI State
   sidebarOpen: boolean;
@@ -30,6 +34,7 @@ interface AppStore {
   setView: (view: 'session' | 'profile' | 'items' | 'skills' | 'settings') => void;
   toggleSidebar: () => void;
   setAutoScroll: (val: boolean) => void;
+  toggleBrowserViewport: () => void;
   fetchSessions: () => Promise<void>;
 }
 
@@ -39,6 +44,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   activeSessionId: null,
   sessionEvents: new Map(),
   sessionStatuses: new Map(),
+  browserScreenshots: new Map(),
+  browserViewportVisible: true,
   sidebarOpen: true,
   currentView: 'session',
   autoScroll: true,
@@ -82,6 +89,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
         const events = new Map(state.sessionEvents);
         events.set(msg.sessionId, msg.events);
         set({ sessionEvents: events });
+        return;
+      }
+
+      // Handle browser screenshots separately (don't store in events array)
+      if (msg.type === 'browser-screenshot' && 'data' in msg) {
+        const ssMsg = msg as { type: 'browser-screenshot'; sessionId: string; data: string; url: string; timestamp: number };
+        const screenshots = new Map(state.browserScreenshots);
+        screenshots.set(ssMsg.sessionId, { data: ssMsg.data, url: ssMsg.url, timestamp: ssMsg.timestamp });
+        set({ browserScreenshots: screenshots });
         return;
       }
 
@@ -158,6 +174,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setView: (view) => set({ currentView: view }),
   toggleSidebar: () => set(s => ({ sidebarOpen: !s.sidebarOpen })),
   setAutoScroll: (val) => set({ autoScroll: val }),
+  toggleBrowserViewport: () => set(s => ({ browserViewportVisible: !s.browserViewportVisible })),
 
   fetchSessions: async () => {
     try {

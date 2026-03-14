@@ -506,4 +506,22 @@ export class BrowserEngine {
       // Screenshot failed, not critical
     }
   }
+
+  async screenshotToBase64(): Promise<string | null> {
+    try {
+      const page = this.currentPage();
+      const buffer = await page.screenshot({ fullPage: false, type: 'jpeg', quality: 60 });
+      return buffer.toString('base64');
+    } catch {
+      return null;
+    }
+  }
+
+  getCurrentUrl(): string {
+    try {
+      return this.currentPage().url();
+    } catch {
+      return '';
+    }
+  }
 }

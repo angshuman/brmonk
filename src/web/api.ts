@@ -66,6 +66,18 @@ export function createApiRouter(
     return res.json(session.events);
   });
 
+  router.get('/sessions/:id/screenshot', (req, res) => {
+    const { id } = req.params;
+    const session = sessions.get(id!);
+    if (!session) {
+      return res.status(404).json({ error: 'Active session not found' });
+    }
+    if (!session.latestScreenshot) {
+      return res.status(404).json({ error: 'No screenshot available' });
+    }
+    return res.json(session.latestScreenshot);
+  });
+
   // Profile
   router.get('/profile', async (_req, res) => {
     try {

@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useAppStore } from '../hooks/useSession';
 import { StatusBar } from './StatusBar';
 import { ThoughtChain } from './ThoughtChain';
 import { ChatInput } from './ChatInput';
+import { BrowserViewport } from './BrowserViewport';
 import {
   Zap, CheckCircle, XCircle, AlertTriangle, Wrench, Globe, Clock,
-  ListOrdered, ChevronDown, ChevronRight,
+  ListOrdered, ChevronDown, ChevronRight, GripVertical,
 } from 'lucide-react';
 import clsx from 'clsx';
 import type { StoredSession } from '../types';
@@ -160,8 +161,94 @@ function StoredSessionView({ sessionId }: { sessionId: string }) {
   );
 }
 
+/** Resizable split panel for thought chain + browser viewport */
+function SplitPanel({
+  sessionId,
+  showViewport,
+}: {
+  sessionId: string;
+  showViewport: boolean;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [splitRatio, setSplitRatio] = useState(0.55); // left panel takes 55% by default
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const ratio = Math.min(Math.max(x / rect.width, 0.25), 0.85);
+      setSplitRatio(ratio);
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging]);
+
+  if (!showViewport) {
+    // Full width thought chain
+    return (
+      <div className="flex-1 flex flex-col min-h-0">
+        <ThoughtChain sessionId={sessionId} />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      className="flex-1 flex min-h-0 relative"
+      style={{ cursor: isDragging ? 'col-resize' : undefined }}
+    >
+      {/* Left: Thought chain */}
+      <div
+        className="flex flex-col min-h-0 overflow-hidden"
+        style={{ width: `${splitRatio * 100}%` }}
+      >
+        <ThoughtChain sessionId={sessionId} />
+      </div>
+
+      {/* Drag handle */}
+      <div
+        className={clsx(
+          'w-[5px] flex-shrink-0 flex items-center justify-center cursor-col-resize group',
+          'hover:bg-accent/10 transition-colors',
+          isDragging && 'bg-accent/20',
+        )}
+        onMouseDown={handleMouseDown}
+      >
+        <GripVertical size={12} className="text-muted/50 group-hover:text-accent/50" />
+      </div>
+
+      {/* Right: Browser viewport */}
+      <div
+        className="min-h-0 overflow-hidden"
+        style={{ width: `${(1 - splitRatio) * 100}%` }}
+      >
+        <BrowserViewport sessionId={sessionId} />
+      </div>
+    </div>
+  );
+}
+
 export function SessionView() {
-  const { activeSessionId, sessions, storedSessions, sessionEvents } = useAppStore();
+  const { activeSessionId, sessions, storedSessions, sessionEvents, browserViewportVisible, sessionStatuses } = useAppStore();
 
   if (!activeSessionId) {
     return (
@@ -193,10 +280,19 @@ export function SessionView() {
     );
   }
 
+  // Check if this session has any browser screenshots or is running (to decide if viewport is relevant)
+  const status = sessionStatuses.get(activeSessionId);
+  const isRunning = status === 'running' || status === 'waiting-for-user' || status === 'paused';
+  const hasScreenshot = useAppStore.getState().browserScreenshots.has(activeSessionId);
+  const showViewport = browserViewportVisible && (isRunning || hasScreenshot);
+
   return (
     <div className="flex flex-col h-full">
       <StatusBar sessionId={activeSessionId} />
-      <ThoughtChain sessionId={activeSessionId} />
+      <SplitPanel
+        sessionId={activeSessionId}
+        showViewport={showViewport}
+      />
       <ChatInput />
     </div>
   );

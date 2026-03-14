@@ -26,6 +26,7 @@ export interface ActiveSession {
   events: AgentEvent[];
   status: string;
   startedAt: number;
+  latestScreenshot?: { data: string; url: string; timestamp: number };
 }
 
 interface WsMessage {
@@ -113,6 +114,13 @@ export async function startWebServer(port: number): Promise<void> {
 
     // Forward all events to WebSocket clients and store them
     eventBus.onEvent((event: AgentEvent) => {
+      if (event.type === 'browser-screenshot') {
+        // Screenshots are large — don't store in events array, just keep latest & broadcast
+        const ssEvent = event as { type: 'browser-screenshot'; sessionId: string; data: string; url: string; timestamp: number };
+        session.latestScreenshot = { data: ssEvent.data, url: ssEvent.url, timestamp: ssEvent.timestamp };
+        broadcast(sessionId, event);
+        return;
+      }
       session.events.push(event);
       if (event.type === 'status') {
         session.status = (event as { type: 'status'; sessionId: string; status: string }).status;
