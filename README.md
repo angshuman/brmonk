@@ -70,6 +70,72 @@ The agent loop follows an **observe → reason → act** cycle:
 
 ## Quick Start
 
+brmonk supports two deployment modes: **Docker** (recommended for production) and **Local** (simpler, good for development).
+
+### Option 1: Docker Mode (recommended)
+
+The browser runs on your host machine; brmonk runs in Docker and connects to it.
+
+**macOS / Linux / WSL:**
+```bash
+# 1. Add your API key(s) to .env
+cp .env.example .env && edit .env
+
+# 2. Launch everything with one command
+./brmonk.sh
+```
+
+**Windows (PowerShell):**
+```powershell
+# 1. Add your API key(s) to .env
+copy .env.example .env
+notepad .env
+
+# 2. Launch everything with one command
+.\brmonk.ps1
+```
+
+**Windows (CMD):**
+```cmd
+brmonk.bat
+```
+
+This builds the Docker image (first time), starts Chrome with remote debugging, starts brmonk in Docker, and opens the web UI at http://localhost:3333.
+
+To stop: `./brmonk.sh --stop` or `.\brmonk.ps1 -Stop`
+
+### Option 2: Local Mode (no Docker)
+
+Runs brmonk directly on your machine.
+
+**macOS / Linux / WSL:**
+```bash
+# Install deps & build on first run
+npm install && npm run build && npm run build:web
+npx playwright install chromium
+
+# Set at least one API key
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# Start web UI
+./scripts/start-local.sh
+
+# Or start TUI console
+./scripts/start-local.sh --console
+```
+
+**Windows (PowerShell):**
+```powershell
+npm install; npm run build; npm run build:web
+npx playwright install chromium
+
+$env:ANTHROPIC_API_KEY = "sk-ant-..."
+
+.\scripts\start-local.ps1
+```
+
+### Manual Quick Start
+
 ```bash
 # Install dependencies
 npm install
@@ -89,10 +155,14 @@ npm run build
 brmonk
 
 # Or run a single task
-brmonk run "Search Google for Node.js jobs in San Francisco"
+brmonk run "Search for the latest AI news"
 
 # Interactive REPL mode
 brmonk interactive
+
+# Web UI
+npm run build:web
+brmonk web --port 3333
 ```
 
 ## CLI Commands
@@ -234,6 +304,112 @@ All string fields support `{{variable}}` interpolation:
 - `{{#if var}}...{{/if}}` — Conditional blocks
 
 See `examples/skills/` for complete working examples.
+
+## Launcher Scripts
+
+brmonk includes launcher scripts for every platform. These handle building, starting the browser, starting the container, and opening the web UI — all in one command.
+
+### One-Command Launchers (Docker mode)
+
+| Script | Platform | Description |
+|--------|----------|-------------|
+| `./brmonk.sh` | macOS / Linux / WSL | Builds image, starts Chrome + Docker, opens web UI |
+| `.\brmonk.ps1` | Windows PowerShell | Same as above for Windows |
+| `brmonk.bat` | Windows CMD | Batch wrapper that calls `brmonk.ps1` |
+
+**Options:**
+
+| Flag (sh) | Flag (ps1) | Default | Description |
+|-----------|------------|---------|-------------|
+| `--port <n>` | `-Port <n>` | 3333 | Web UI port |
+| `--cdp-port <n>` | `-CdpPort <n>` | 9222 | Chrome remote debug port |
+| `--mcp` | `-Mcp` | off | Use MCP mode instead of CDP |
+| `--rebuild` | `-Rebuild` | off | Force Docker image rebuild |
+| `--stop` | `-Stop` | — | Stop all brmonk services |
+
+### Local Mode Launchers (no Docker)
+
+| Script | Platform | Description |
+|--------|----------|-------------|
+| `./scripts/start-local.sh` | macOS / Linux / WSL | Run natively with local Playwright browser |
+| `.\scripts\start-local.ps1` | Windows PowerShell | Same for Windows |
+
+**Options:**
+
+| Flag (sh) | Flag (ps1) | Default | Description |
+|-----------|------------|---------|-------------|
+| `--port <n>` | `-Port <n>` | 3333 | Web UI port |
+| `--console` | `-Console` | off | Launch TUI console instead of web UI |
+| `--build` | `-Build` | off | Rebuild before starting |
+| `--headless` | `-Headless` | off | Run browser headless |
+
+### Browser Helper Scripts
+
+| Script | Platform | Description |
+|--------|----------|-------------|
+| `./scripts/start-browser.sh` | macOS / Linux / WSL | Start Chrome with CDP (auto-detects WSL → Windows Chrome) |
+| `.\scripts\start-browser.ps1` | Windows | Start Chrome with CDP |
+| `./scripts/start-mcp-server.sh` | macOS / Linux / WSL | Start Playwright MCP server |
+| `.\scripts\start-mcp-server.ps1` | Windows | Start Playwright MCP server |
+
+## Docker
+
+Run brmonk in a Docker container while the browser runs on your host machine. Two connection modes are available.
+
+> **Easiest way:** Use `./brmonk.sh` or `.\brmonk.ps1` — they handle everything below automatically.
+
+### Option A: Remote CDP (recommended)
+
+Chrome DevTools Protocol gives brmonk full Playwright API access including live screenshots.
+
+```bash
+# 1. On your host, start Chrome with remote debugging:
+./scripts/start-browser.sh          # macOS/Linux/WSL
+.\scripts\start-browser.ps1         # Windows
+
+# 2. Copy .env.example to .env and add your API key(s)
+cp .env.example .env
+
+# 3. Start brmonk in Docker:
+docker compose --profile cdp up
+```
+
+Open http://localhost:3333 for the web UI.
+
+### Option B: Remote MCP
+
+Playwright MCP server runs on the host; brmonk connects over HTTP.
+
+```bash
+# 1. On your host, start the Playwright MCP server:
+./scripts/start-mcp-server.sh       # macOS/Linux/WSL
+.\scripts\start-mcp-server.ps1      # Windows
+
+# 2. Start brmonk in Docker:
+docker compose --profile mcp up
+```
+
+### Build the Docker Image Manually
+
+```bash
+# Build backend + frontend first
+npm run build
+npm run build:web
+
+# Build Docker image
+docker build -t brmonk .
+```
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `BRMONK_BROWSER_BACKEND` | `playwright`, `playwright-mcp`, `remote-cdp`, or `remote-mcp` |
+| `BRMONK_CDP_URL` | Chrome CDP endpoint (e.g. `http://host.docker.internal:9222`) |
+| `BRMONK_MCP_URL` | Playwright MCP endpoint (e.g. `http://host.docker.internal:3100/mcp`) |
+| `BRMONK_MEMORY_DIR` | Directory for persistent data (default: `~/.brmonk`) |
+| `BRMONK_SKILLS_DIR` | Directory for user skills (default: `~/.brmonk/skills`) |
+| `BRMONK_HEADLESS` | Run browser headless (`true`/`false`) |
 
 ## Development
 
