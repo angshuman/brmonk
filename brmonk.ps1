@@ -74,6 +74,23 @@ if ($Stop) {
         try { Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue } catch {}
         Remove-Item $mcpPidFile -Force -ErrorAction SilentlyContinue
     }
+    # Remove CDP port forwarding rule (Chrome only binds 127.0.0.1, we proxy 0.0.0.0 -> 127.0.0.1)
+    $portFile = Join-Path $env:TEMP "brmonk-cdp-port.txt"
+    if (Test-Path $portFile) {
+        $fwdPort = (Get-Content $portFile).Trim()
+        try {
+            netsh interface portproxy delete v4tov4 listenport=$fwdPort listenaddress=0.0.0.0 2>$null | Out-Null
+            Write-Host "Removed CDP port forwarding rule for port $fwdPort" -ForegroundColor Gray
+        } catch {}
+        Remove-Item $portFile -Force -ErrorAction SilentlyContinue
+    }
+    # Clean up temp Chrome data dir
+    $chromeDir = Join-Path $env:TEMP "brmonk-chrome-dir.txt"
+    if (Test-Path $chromeDir) {
+        $dir = (Get-Content $chromeDir).Trim()
+        if (Test-Path $dir) { Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue }
+        Remove-Item $chromeDir -Force -ErrorAction SilentlyContinue
+    }
     Write-Host "Done." -ForegroundColor Green
     exit 0
 }
@@ -252,15 +269,18 @@ if ($Mode -eq "cdp") {
         Pop-Location; exit 1
     }
     Write-Host "Found browser: $Chrome" -ForegroundColor Green
-    Write-Host "Starting Chrome with CDP on port $CdpPort (listening on all interfaces)..." -ForegroundColor Cyan
+    Write-Host "Starting Chrome with CDP on port $CdpPort..." -ForegroundColor Cyan
 
     # Create a temp user data dir so it doesn't conflict with your main profile
+    # Chrome 136+ REQUIRES --user-data-dir for remote debugging to work
     $TempDataDir = Join-Path $env:TEMP "brmonk-chrome-$(Get-Random)"
     New-Item -ItemType Directory -Path $TempDataDir -Force | Out-Null
 
+    # NOTE: --remote-debugging-address was removed in recent Chrome versions.
+    # Chrome now hard-codes binding to 127.0.0.1 only (security hardening).
+    # We use netsh portproxy below to make it accessible from Docker.
     $browserProc = Start-Process -FilePath $Chrome -ArgumentList @(
         "--remote-debugging-port=$CdpPort",
-        "--remote-debugging-address=0.0.0.0",
         "--user-data-dir=$TempDataDir",
         "--no-first-run",
         "--no-default-browser-check",
@@ -274,6 +294,27 @@ if ($Mode -eq "cdp") {
     # Store temp dir path for cleanup on stop
     $TempDataDir | Out-File (Join-Path $env:TEMP "brmonk-chrome-dir.txt") -Force
     Start-Sleep -Seconds 3
+
+    # Set up port forwarding: 0.0.0.0:CdpPort -> 127.0.0.1:CdpPort
+    # This allows Docker (via host.docker.internal) to reach Chrome's debug port,
+    # since Chrome now only binds to 127.0.0.1.
+    Write-Host "Setting up port forwarding for Docker access..." -ForegroundColor Cyan
+    try {
+        # Remove any stale rule first
+        netsh interface portproxy delete v4tov4 listenport=$CdpPort listenaddress=0.0.0.0 2>$null | Out-Null
+        netsh interface portproxy add v4tov4 listenport=$CdpPort listenaddress=0.0.0.0 connectport=$CdpPort connectaddress=127.0.0.1 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Port forwarding: 0.0.0.0:$CdpPort -> 127.0.0.1:$CdpPort" -ForegroundColor Green
+            $CdpPort.ToString() | Out-File (Join-Path $env:TEMP "brmonk-cdp-port.txt") -Force
+        } else {
+            Write-Host "Warning: Port forwarding failed. Run as Administrator if Docker can't reach Chrome." -ForegroundColor Yellow
+            Write-Host "  Or run manually: netsh interface portproxy add v4tov4 listenport=$CdpPort listenaddress=0.0.0.0 connectport=$CdpPort connectaddress=127.0.0.1" -ForegroundColor Gray
+        }
+    } catch {
+        Write-Host "Warning: Port forwarding requires Administrator privileges." -ForegroundColor Yellow
+        Write-Host "  Run this PowerShell as Administrator, or manually run:" -ForegroundColor Yellow
+        Write-Host "  netsh interface portproxy add v4tov4 listenport=$CdpPort listenaddress=0.0.0.0 connectport=$CdpPort connectaddress=127.0.0.1" -ForegroundColor Gray
+    }
 } else {
     Write-Host "Starting Playwright MCP server on port $McpPort (listening on all interfaces)..." -ForegroundColor Cyan
     $mcpProc = Start-Process powershell -ArgumentList "-NoProfile", "-Command", "npx -y @playwright/mcp@latest --port $McpPort --host 0.0.0.0" -PassThru -WindowStyle Normal

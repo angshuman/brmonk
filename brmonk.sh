@@ -78,8 +78,8 @@ if $STOP; then
     echo "Stopping brmonk services..."
     cd "$SCRIPT_DIR"
     docker compose --profile cdp --profile mcp down 2>/dev/null || true
-    # Kill browser/MCP processes
-    for pidfile in /tmp/brmonk-browser.pid /tmp/brmonk-mcp.pid; do
+    # Kill browser/MCP/socat processes
+    for pidfile in /tmp/brmonk-browser.pid /tmp/brmonk-mcp.pid /tmp/brmonk-socat.pid; do
         if [ -f "$pidfile" ]; then
             kill "$(cat "$pidfile")" 2>/dev/null || true
             rm -f "$pidfile"
@@ -303,9 +303,14 @@ if [ "$MODE" = "cdp" ]; then
         exit 1
     fi
     echo "Found browser: $CHROME"
-    echo "Starting Chrome with CDP on port $CDP_PORT (listening on all interfaces)..."
+    echo "Starting Chrome with CDP on port $CDP_PORT..."
 
-    # Create temp user data dir
+    # NOTE: --remote-debugging-address was removed in recent Chrome versions.
+    # Chrome now hard-codes binding to 127.0.0.1 only (security hardening).
+    # We use socat (macOS/Linux) or netsh portproxy (Windows/WSL) to make it
+    # accessible from Docker via host.docker.internal.
+
+    # Create temp user data dir (Chrome 136+ requires --user-data-dir for remote debugging)
     TEMP_DATA_DIR=$(mktemp -d -t brmonk-chrome-XXXXXX)
     echo "$TEMP_DATA_DIR" > /tmp/brmonk-chrome-dir.txt
 
@@ -313,11 +318,20 @@ if [ "$MODE" = "cdp" ]; then
         WIN_TEMP=$(cmd.exe /C "echo %TEMP%" 2>/dev/null | tr -d '\r')
         WIN_DATA_DIR="$WIN_TEMP\\brmonk-chrome-$$"
         WIN_CHROME=$(wslpath -w "$CHROME")
-        cmd.exe /C "\"$WIN_CHROME\" --remote-debugging-port=$CDP_PORT --remote-debugging-address=0.0.0.0 --user-data-dir=\"$WIN_DATA_DIR\" --no-first-run --no-default-browser-check --disable-background-networking --disable-sync --window-size=1280,720 about:blank" 2>/dev/null &
+        cmd.exe /C "\"$WIN_CHROME\" --remote-debugging-port=$CDP_PORT --user-data-dir=\"$WIN_DATA_DIR\" --no-first-run --no-default-browser-check --disable-background-networking --disable-sync --window-size=1280,720 about:blank" 2>/dev/null &
+        # WSL note: portproxy needs admin PowerShell on Windows side
+        echo "Setting up port forwarding (WSL -> Windows netsh)..."
+        powershell.exe -Command "netsh interface portproxy delete v4tov4 listenport=$CDP_PORT listenaddress=0.0.0.0" 2>/dev/null || true
+        powershell.exe -Command "netsh interface portproxy add v4tov4 listenport=$CDP_PORT listenaddress=0.0.0.0 connectport=$CDP_PORT connectaddress=127.0.0.1" 2>/dev/null
+        if [ $? -eq 0 ]; then
+            echo "Port forwarding: 0.0.0.0:$CDP_PORT -> 127.0.0.1:$CDP_PORT"
+        else
+            echo "Warning: Port forwarding failed. Run WSL as Administrator for Docker access."
+            echo "  Or run in admin PowerShell: netsh interface portproxy add v4tov4 listenport=$CDP_PORT listenaddress=0.0.0.0 connectport=$CDP_PORT connectaddress=127.0.0.1"
+        fi
     else
         "$CHROME" \
             --remote-debugging-port="$CDP_PORT" \
-            --remote-debugging-address=0.0.0.0 \
             --user-data-dir="$TEMP_DATA_DIR" \
             --no-first-run \
             --no-default-browser-check \
@@ -325,6 +339,23 @@ if [ "$MODE" = "cdp" ]; then
             --disable-sync \
             --window-size=1280,720 \
             "about:blank" &
+
+        # Set up socat port forwarder for Docker access
+        # Chrome only binds 127.0.0.1; Docker needs to reach it via 0.0.0.0
+        if command -v socat &>/dev/null; then
+            sleep 1  # Let Chrome start first
+            socat TCP-LISTEN:"$CDP_PORT",bind=0.0.0.0,fork,reuseaddr TCP:127.0.0.1:"$CDP_PORT" &
+            SOCAT_PID=$!
+            echo "$SOCAT_PID" > /tmp/brmonk-socat.pid
+            echo "Port forwarding (socat): 0.0.0.0:$CDP_PORT -> 127.0.0.1:$CDP_PORT"
+        else
+            echo "Warning: socat not found. Docker may not be able to reach Chrome."
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                echo "  Install: brew install socat"
+            else
+                echo "  Install: sudo apt install socat"
+            fi
+        fi
     fi
     BROWSER_PID=$!
     echo "$BROWSER_PID" > /tmp/brmonk-browser.pid

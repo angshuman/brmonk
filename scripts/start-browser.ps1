@@ -39,19 +39,36 @@ if (-not $Chrome) {
 }
 
 Write-Host "Found browser: $Chrome" -ForegroundColor Green
-Write-Host "Remote debugging URL: http://localhost:$Port (listening on all interfaces)" -ForegroundColor Green
+Write-Host "Remote debugging URL: http://localhost:$Port" -ForegroundColor Green
+Write-Host ""
+
+# Create a temporary user data dir (Chrome 136+ requires --user-data-dir for remote debugging)
+$TempDataDir = Join-Path $env:TEMP "brmonk-chrome-$(Get-Random)"
+New-Item -ItemType Directory -Path $TempDataDir -Force | Out-Null
+
+# Chrome removed --remote-debugging-address; it now only binds to 127.0.0.1.
+# Set up port forwarding so Docker (host.docker.internal) can reach it.
+$portForwarded = $false
+try {
+    netsh interface portproxy delete v4tov4 listenport=$Port listenaddress=0.0.0.0 2>$null | Out-Null
+    netsh interface portproxy add v4tov4 listenport=$Port listenaddress=0.0.0.0 connectport=$Port connectaddress=127.0.0.1 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "Port forwarding: 0.0.0.0:$Port -> 127.0.0.1:$Port (for Docker access)" -ForegroundColor Green
+        $portForwarded = $true
+    } else {
+        Write-Host "Warning: Port forwarding failed. Run as Administrator for Docker access." -ForegroundColor Yellow
+    }
+} catch {
+    Write-Host "Warning: Port forwarding requires Administrator privileges." -ForegroundColor Yellow
+}
+
 Write-Host ""
 Write-Host "Close the browser window or press Ctrl+C to stop." -ForegroundColor Yellow
 Write-Host ""
 
-# Create a temporary user data dir
-$TempDataDir = Join-Path $env:TEMP "brmonk-chrome-$(Get-Random)"
-New-Item -ItemType Directory -Path $TempDataDir -Force | Out-Null
-
 try {
     & $Chrome `
         "--remote-debugging-port=$Port" `
-        "--remote-debugging-address=0.0.0.0" `
         "--user-data-dir=$TempDataDir" `
         "--no-first-run" `
         "--no-default-browser-check" `
@@ -61,6 +78,10 @@ try {
         "about:blank"
 }
 finally {
+    # Clean up port forwarding rule
+    if ($portForwarded) {
+        netsh interface portproxy delete v4tov4 listenport=$Port listenaddress=0.0.0.0 2>$null | Out-Null
+    }
     # Clean up temp dir
     if (Test-Path $TempDataDir) {
         Remove-Item -Recurse -Force $TempDataDir -ErrorAction SilentlyContinue
