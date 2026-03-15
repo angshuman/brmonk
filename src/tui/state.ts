@@ -7,7 +7,7 @@ export interface LogEntry {
 export interface SessionState {
   id: string;
   task: string;
-  status: 'running' | 'completed' | 'failed' | 'paused' | 'waiting-for-user';
+  status: 'running' | 'completed' | 'failed' | 'max-steps' | 'paused' | 'waiting-for-user';
   currentStep: number;
   maxSteps: number;
   plan: string[];

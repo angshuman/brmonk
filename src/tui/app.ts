@@ -443,7 +443,7 @@ export class TUIApp {
         session.result = agentState.result;
         session.totalInputTokens = agentState.totalInputTokens;
         session.totalOutputTokens = agentState.totalOutputTokens;
-        addLogEntry(session, agentState.status === 'completed' ? 'result' : 'error',
+        addLogEntry(session, agentState.status === 'failed' ? 'error' : 'result',
           agentState.result ?? 'Task ended');
       }
 
@@ -489,7 +489,7 @@ export class TUIApp {
       session.result = agentState.result;
       session.totalInputTokens += agentState.totalInputTokens;
       session.totalOutputTokens += agentState.totalOutputTokens;
-      addLogEntry(session, agentState.status === 'completed' ? 'result' : 'error',
+      addLogEntry(session, agentState.status === 'failed' ? 'error' : 'result',
         agentState.result ?? 'Follow-up ended');
       await this.memory.saveSession(session.id, agentState.history, session.task);
       this.currentAgent = null;
@@ -537,7 +537,10 @@ export class TUIApp {
         break;
       case 'result':
         session.result = event.result;
-        session.status = 'completed';
+        // Don't override status if it's already set to max-steps (partial result)
+        if (session.status !== 'max-steps') {
+          session.status = 'completed';
+        }
         addLogEntry(session, 'result', event.result);
         break;
       case 'error':

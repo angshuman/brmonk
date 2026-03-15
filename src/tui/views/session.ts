@@ -56,6 +56,7 @@ export function renderSession(renderer: Renderer, state: AppState): void {
   const statusColor = session.status === 'running' ? chalk.green
     : session.status === 'completed' ? chalk.green
     : session.status === 'failed' ? chalk.red
+    : session.status === 'max-steps' ? chalk.yellow
     : chalk.yellow;
   const tokenInfo = session.totalInputTokens > 0
     ? ` · Tokens: ${formatTokens(session.totalInputTokens)}in/${formatTokens(session.totalOutputTokens)}out`
@@ -99,14 +100,14 @@ export function renderSession(renderer: Renderer, state: AppState): void {
   if (state.messageInputMode) {
     content.push(`  ${chalk.cyan('Message>')} ${state.messageBuffer}${chalk.gray('█')}`);
     content.push(chalk.gray('  [Enter] Send  [Esc] Cancel'));
-  } else if (session.status === 'completed' || session.status === 'failed') {
+  } else if (session.status === 'completed' || session.status === 'failed' || session.status === 'max-steps') {
     content.push(chalk.gray('  [m] Send follow-up  [b] Back'));
   } else {
     content.push(chalk.gray('  [m] Send message  [p] Pause/Resume  [s] Screenshot  [b] Back'));
   }
 
   const lines = renderer.drawBox(title, content, {
-    borderColor: session.status === 'running' ? 'green' : session.status === 'failed' ? 'red' : 'gray',
+    borderColor: session.status === 'running' ? 'green' : session.status === 'failed' ? 'red' : session.status === 'max-steps' ? 'yellow' : 'gray',
     titleColor: 'white',
   });
   for (const line of lines) {

@@ -50,22 +50,37 @@ Use the provided tools to interact with the page:
 - **scrollToElement(index)**: Scroll an element into view
 - **waitForElement(text, timeout?)**: Wait for an element with specific text to appear
 
-## Strategy
-1. First observe the page carefully - read all elements before acting
-2. Plan your approach step by step
-3. Execute one action at a time and observe the result
-4. If an action fails, try an alternative approach
-5. For forms: identify all fields first, fill them out, then submit
-6. For navigation: look for links/buttons, click them, wait for page load
-7. For data extraction: read page content carefully, use evaluate() for complex extraction
-8. If you encounter popups or cookie banners, use dismissPopups() to clear them
-9. If you encounter a CAPTCHA, use waitForUser() to ask the user to solve it
-10. If a login is required, use waitForUser() to ask the user to log in
+## Strategy — Be Efficient
+You have a limited step budget. Every tool call counts as progress toward that budget.
+
+**Planning before acting:**
+1. Read the full page state ONCE, then plan your sequence of actions
+2. Identify the optimal order: e.g., if a page has a search bar AND filters, decide which to use first based on what narrows results fastest
+3. For forms with multiple fields: plan all fields, then fill them in order, then submit — don't re-observe between each field unless something fails
+
+**Be decisive, not tentative:**
+- If you can see the element you need, act on it immediately — don't scroll around exploring first
+- If a click didn't work, try clickByText or evaluate() as alternatives — don't retry the same approach
+- If you need data from a page, use evaluate() to extract it all at once rather than clicking through elements one by one
+- Use goTo(url) directly when you know the URL instead of navigating through menus
+
+**When things go wrong:**
+- If an action fails, CHANGE your approach — use a different selector, try JavaScript, or navigate differently
+- If the page looks the same after an action, the action probably didn't work — try an alternative immediately
+- If you're stuck in a loop (same page, same state), step back and try a completely different strategy
+- Never repeat the same failing action more than once
+
+**Avoid wasting steps:**
+- Don't call screenshot() just to look — you already get the page state each step
+- Don't call waitForLoad() after every click — only when navigating to a new page
+- Don't dismiss popups manually — they're auto-dismissed for you before each step
+- If "Page unchanged from previous observation" appears, your last action had no effect — change approach
 
 ## Completion
 - Use **done(result)** when you have accomplished the task. Include any relevant data/results.
 - Use **fail(reason)** when the task genuinely cannot be completed after reasonable attempts.
-- Always prefer done() over fail() - be persistent and creative in finding solutions.`;
+- Always prefer done() over fail() — be persistent and creative.
+- When running low on steps, wrap up with the best partial result using done() rather than running out.`;
 
 const TOKEN_LIMIT = 30000;
 
@@ -103,6 +118,7 @@ export class AgentLoop {
   private pauseResolver: (() => void) | null = null;
   private lastObservationHash = '';
   private pendingMessages: string[] = [];
+  private consecutiveUnchanged = 0;
   private lastCaptchaCheckTime = 0;
   private lastCaptchaCheckUrl = '';
   private startedAt = '';
@@ -185,19 +201,64 @@ export class AgentLoop {
 
   private summarizeHistory(messages: LLMMessage[]): string {
     const actions: string[] = [];
+    const urlsSeen = new Set<string>();
+    const errors: string[] = [];
+    const keyFindings: string[] = [];
+
     for (const msg of messages) {
-      if (msg.role === 'user' && msg.content.startsWith('Tool Results:')) {
-        const lines = msg.content.split('\n').filter(l => l.startsWith('- '));
-        for (const line of lines) {
-          actions.push(line.slice(2).slice(0, 100));
+      if (msg.role === 'user') {
+        // Extract URLs visited from page state observations
+        const urlMatch = msg.content.match(/URL:\s*(https?:\/\/[^\s]+)/);
+        if (urlMatch) urlsSeen.add(urlMatch[1]);
+
+        // Extract tool results
+        if (msg.content.startsWith('Tool Results:')) {
+          const lines = msg.content.split('\n').filter(l => l.startsWith('- '));
+          for (const line of lines) {
+            const trimmed = line.slice(2).slice(0, 150);
+            actions.push(trimmed);
+            // Detect errors in tool results
+            if (/error|failed|timeout|blocked|denied/i.test(trimmed)) {
+              errors.push(trimmed.slice(0, 100));
+            }
+            // Detect successful data extraction
+            if (/done\(|extracted|found|result/i.test(trimmed)) {
+              keyFindings.push(trimmed.slice(0, 100));
+            }
+          }
+        }
+
+        // Detect stuck warnings
+        if (msg.content.includes('STUCK DETECTED') || msg.content.includes('Page unchanged')) {
+          errors.push('Agent got stuck (page unchanged)');
         }
       } else if (msg.role === 'assistant' && msg.content) {
-        const short = msg.content.slice(0, 80);
+        const short = msg.content.slice(0, 120);
         actions.push(`Thought: ${short}`);
       }
     }
-    if (actions.length === 0) return 'No significant actions taken yet.';
-    return `Summary of previous actions:\n${actions.slice(-15).join('\n')}`;
+
+    const parts: string[] = [];
+
+    if (urlsSeen.size > 0) {
+      parts.push(`URLs visited: ${Array.from(urlsSeen).join(', ')}`);
+    }
+
+    if (keyFindings.length > 0) {
+      parts.push(`Key findings:\n${keyFindings.slice(-5).map(f => `  - ${f}`).join('\n')}`);
+    }
+
+    if (errors.length > 0) {
+      const uniqueErrors = [...new Set(errors)];
+      parts.push(`Errors encountered (avoid repeating these):\n${uniqueErrors.slice(-5).map(e => `  - ${e}`).join('\n')}`);
+    }
+
+    if (actions.length > 0) {
+      parts.push(`Recent actions:\n${actions.slice(-10).map(a => `  - ${a}`).join('\n')}`);
+    }
+
+    if (parts.length === 0) return 'No significant actions taken yet.';
+    return `Summary of previous steps:\n${parts.join('\n\n')}`;
   }
 
   private manageContext(): void {
@@ -231,6 +292,7 @@ export class AgentLoop {
     this.paused = false;
     this.lastObservationHash = '';
     this.pendingMessages = [];
+    this.consecutiveUnchanged = 0;
     this.actionExecutor.resetStatus();
     this.startedAt = new Date().toISOString();
     this.toolsUsedSet.clear();
@@ -541,10 +603,38 @@ export class AgentLoop {
         await this.captureScreenshot();
       }
 
+      // Track consecutive unchanged observations
+      if (observation === 'Page unchanged from previous observation.') {
+        this.consecutiveUnchanged++;
+      } else {
+        this.consecutiveUnchanged = 0;
+      }
+
+      // Build observation with step budget awareness and failure hints
+      let enrichedObservation = `Current page state:\n${observation}`;
+
+      // Step budget awareness — let the LLM know where it stands
+      const remaining = this.state.maxSteps - this.state.stepCount;
+      const pctUsed = Math.round((this.state.stepCount / this.state.maxSteps) * 100);
+      if (pctUsed >= 80) {
+        enrichedObservation += `\n\n⚠️ STEP BUDGET CRITICAL: ${remaining} steps remaining out of ${this.state.maxSteps} (${pctUsed}% used). Wrap up NOW — call done() with your best partial result.`;
+      } else if (pctUsed >= 60) {
+        enrichedObservation += `\n\n⏱️ Step budget: ${remaining} steps remaining (${pctUsed}% used). Start wrapping up — focus only on the core task.`;
+      } else if (pctUsed >= 40) {
+        enrichedObservation += `\n\nStep ${this.state.stepCount}/${this.state.maxSteps} — ${remaining} steps remaining.`;
+      }
+
+      // Consecutive failure detection — inject strategy change hints
+      if (this.consecutiveUnchanged >= 3) {
+        enrichedObservation += `\n\n🚨 STUCK DETECTED: Page has been unchanged for ${this.consecutiveUnchanged} consecutive steps. Your actions are having NO effect. You MUST change strategy immediately:\n- Try evaluate() to run JavaScript directly\n- Try clickByText() or fillFormField() instead of click()/type()\n- Try goTo() to navigate to a different URL\n- Try scrolling to reveal hidden elements\n- If truly stuck, call done() with partial results rather than wasting more steps`;
+      } else if (this.consecutiveUnchanged >= 2) {
+        enrichedObservation += `\n\n⚠️ Page unchanged for 2 steps in a row. Your last action had no effect. Try a different approach.`;
+      }
+
       // Add observation to messages
       this.messages.push({
         role: 'user',
-        content: `Current page state:\n${observation}`,
+        content: enrichedObservation,
       });
 
       // Manage context window
@@ -745,10 +835,41 @@ export class AgentLoop {
     }
 
     if (this.state.status === 'running') {
-      this.state.status = 'failed';
-      this.state.result = `Max steps (${this.state.maxSteps}) reached without completing the task`;
-      logger.error(this.state.result);
-      this.eventBus?.emitError(this.state.result);
+      // Graceful max-steps: attempt a final LLM call to summarize partial progress
+      logger.thought('Step budget exhausted — attempting to summarize partial progress...');
+      this.eventBus?.emitThought('Step budget exhausted — summarizing partial progress...');
+
+      try {
+        const summaryPrompt: LLMMessage = {
+          role: 'user',
+          content: `You have run out of steps. The task was: "${task}"
+
+Summarize what you accomplished so far and any partial results you gathered. Be concise and factual. Include any URLs, data, or findings you collected. Start with what was accomplished, then note what remains unfinished.`,
+        };
+
+        const summaryMessages = [
+          this.messages[0], // system
+          this.messages[1], // task
+          ...this.messages.slice(-6), // recent context
+          summaryPrompt,
+        ];
+
+        const summaryResponse = await this.llm.chat(summaryMessages, {
+          maxTokens: 1024,
+          temperature: 0.1,
+        });
+
+        const partialResult = summaryResponse.content || `Max steps (${this.state.maxSteps}) reached without completing the task`;
+        this.state.status = 'max-steps';
+        this.state.result = partialResult;
+        logger.thought(`Partial result: ${partialResult.slice(0, 200)}`);
+        this.eventBus?.emitResult(partialResult);
+      } catch {
+        // If even the summary call fails, fall back to basic message
+        this.state.status = 'max-steps';
+        this.state.result = `Max steps (${this.state.maxSteps}) reached without completing the task`;
+        this.eventBus?.emitResult(this.state.result);
+      }
     }
 
     // Screenshot on failure

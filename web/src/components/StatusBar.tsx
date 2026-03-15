@@ -6,6 +6,7 @@ function statusBadge(status: string) {
     running: 'bg-accent/10 text-accent',
     completed: 'bg-success/10 text-success',
     failed: 'bg-error/10 text-error',
+    'max-steps': 'bg-warning/10 text-warning',
     paused: 'bg-warning/10 text-warning',
     waiting_for_user: 'bg-warning/10 text-warning',
   };

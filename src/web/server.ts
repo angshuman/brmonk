@@ -174,9 +174,14 @@ export async function startWebServer(port: number): Promise<void> {
       } catch {
         // Non-critical
       }
+      // Log max-steps gracefully (not as an error)
+      if (state.status === 'max-steps') {
+        logger.info(`Session ${sessionId} reached max steps with partial result`);
+      }
     }).catch((err) => {
       session.status = 'failed';
       const errorMsg = err instanceof Error ? err.message : String(err);
+      logger.error(`Session ${sessionId} crashed: ${errorMsg}`);
       eventBus.emitError(errorMsg);
       if (runningSessionId === sessionId) {
         runningSessionId = null;

@@ -12,7 +12,7 @@ export interface AgentState {
   history: AgentStep[];
   stepCount: number;
   maxSteps: number;
-  status: 'running' | 'completed' | 'failed' | 'paused' | 'waiting-for-user';
+  status: 'running' | 'completed' | 'failed' | 'max-steps' | 'paused' | 'waiting-for-user';
   result: string | null;
   totalInputTokens: number;
   totalOutputTokens: number;
