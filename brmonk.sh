@@ -330,8 +330,8 @@ if [ "$MODE" = "cdp" ]; then
     echo "$BROWSER_PID" > /tmp/brmonk-browser.pid
     sleep 3
 else
-    echo "Starting Playwright MCP server on port $MCP_PORT..."
-    npx -y @playwright/mcp@latest --port "$MCP_PORT" &
+    echo "Starting Playwright MCP server on port $MCP_PORT (listening on all interfaces)..."
+    npx -y @playwright/mcp@latest --port "$MCP_PORT" --host 0.0.0.0 &
     MCP_PID=$!
     echo "$MCP_PID" > /tmp/brmonk-mcp.pid
     sleep 3

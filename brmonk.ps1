@@ -275,8 +275,8 @@ if ($Mode -eq "cdp") {
     $TempDataDir | Out-File (Join-Path $env:TEMP "brmonk-chrome-dir.txt") -Force
     Start-Sleep -Seconds 3
 } else {
-    Write-Host "Starting Playwright MCP server on port $McpPort..." -ForegroundColor Cyan
-    $mcpProc = Start-Process powershell -ArgumentList "-NoProfile", "-Command", "npx -y @playwright/mcp@latest --port $McpPort" -PassThru -WindowStyle Normal
+    Write-Host "Starting Playwright MCP server on port $McpPort (listening on all interfaces)..." -ForegroundColor Cyan
+    $mcpProc = Start-Process powershell -ArgumentList "-NoProfile", "-Command", "npx -y @playwright/mcp@latest --port $McpPort --host 0.0.0.0" -PassThru -WindowStyle Normal
     $mcpProc.Id | Out-File (Join-Path $env:TEMP "brmonk-mcp.pid") -Force
     Start-Sleep -Seconds 3
 }

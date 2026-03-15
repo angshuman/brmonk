@@ -18,4 +18,4 @@ echo ""
 echo "Press Ctrl+C to stop."
 echo ""
 
-npx -y @playwright/mcp@latest --port "$PORT"
+npx -y @playwright/mcp@latest --port "$PORT" --host 0.0.0.0

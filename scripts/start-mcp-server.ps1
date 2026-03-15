@@ -17,4 +17,4 @@ Write-Host ""
 Write-Host "Press Ctrl+C to stop." -ForegroundColor Yellow
 Write-Host ""
 
-npx -y @playwright/mcp@latest --port $Port
+npx -y @playwright/mcp@latest --port $Port --host 0.0.0.0
