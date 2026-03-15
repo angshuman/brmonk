@@ -36,7 +36,12 @@ export class AgentEventBus extends EventEmitter {
   }
 
   emitEvent(event: AgentEvent): void {
-    this.emit(event.type, event);
+    // IMPORTANT: Do NOT emit on the 'error' channel — Node's EventEmitter
+    // treats 'error' as special: if no listener is registered it throws
+    // ERR_UNHANDLED_ERROR and crashes the process. We use 'agent-error'
+    // for our error events instead.
+    const channel = event.type === 'error' ? 'agent-error' : event.type;
+    this.emit(channel, event);
     this.emit('*', event);
   }
 
