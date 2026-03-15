@@ -72,7 +72,8 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
-try { docker info 2>$null | Out-Null } catch {
+$dockerCheck = docker info 2>&1
+if ($LASTEXITCODE -ne 0) {
     Write-Host "Error: Docker daemon is not running. Start Docker Desktop first." -ForegroundColor Red
     exit 1
 }
