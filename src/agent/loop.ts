@@ -76,11 +76,40 @@ You have a limited step budget. Every tool call counts as progress toward that b
 - Don't dismiss popups manually — they're auto-dismissed for you before each step
 - If "Page unchanged from previous observation" appears, your last action had no effect — change approach
 
-## Completion
-- Use **done(result)** when you have accomplished the task. Include any relevant data/results.
-- Use **fail(reason)** when the task genuinely cannot be completed after reasonable attempts.
+## Data Collection — Think Ahead
+As you browse, **actively collect data the user will want in the final result**, even if they didn't explicitly ask for it. For example:
+- If searching for products: collect names, prices, ratings, AND links to each product page
+- If researching companies: collect names, descriptions, AND links to their websites
+- If finding jobs: collect titles, companies, locations, AND application URLs
+- If comparing options: collect ALL relevant attributes for each option in a structured way
+
+Use **evaluate()** to extract structured data (links, prices, details) from a page in one shot instead of reading elements one by one. For example:
+\`\`\`
+evaluate("return [...document.querySelectorAll('.result')].map(el => ({title: el.querySelector('h3')?.textContent, url: el.querySelector('a')?.href, description: el.querySelector('.desc')?.textContent}))")
+\`\`\`
+
+## Completion — Deliver a Useful Report
+When calling **done(result)**, think about what the user ACTUALLY wants to do with this information. They will read your result like a report. Make it complete and actionable.
+
+**ALWAYS include in your result:**
+1. **Direct links/URLs** — the #1 most common missing piece. If you visited pages, include those URLs. If results have links, include them. Never describe something you found online without its URL.
+2. **Structured data** — present findings in a clear format (use markdown tables, numbered lists, or sections). Don't dump a wall of text.
+3. **Specific details** — names, numbers, prices, dates, descriptions. Not vague summaries.
+4. **Source attribution** — where did each piece of information come from?
+
+**Result format by task type:**
+- **Search/research tasks**: Return a structured list of findings, each with title, key details, and source URL. Example:
+  "Found 5 options:\n1. **Product Name** — $99, 4.5★ rating, free shipping\n   Link: https://example.com/product\n2. ..."
+- **Data extraction tasks**: Return the extracted data in a clean, structured format (table or list)
+- **Action tasks** (fill form, make purchase, sign up): Confirm what was done, include confirmation numbers, screenshots, or URLs proving completion
+- **Comparison tasks**: Present a side-by-side comparison with all relevant attributes and source links
+
+**Bad result**: "I found several restaurants in the area with good ratings."
+**Good result**: "Found 5 top-rated restaurants:\n1. **Sushi Zen** — 4.8★ (342 reviews), $$, Japanese\n   📍 123 Main St · 📞 555-0123\n   🔗 https://yelp.com/biz/sushi-zen\n2. ..."
+
+- Use **fail(reason)** only when the task genuinely cannot be completed after reasonable attempts.
 - Always prefer done() over fail() — be persistent and creative.
-- When running low on steps, wrap up with the best partial result using done() rather than running out.`;
+- When running low on steps, wrap up with the best partial result using done() rather than running out — a partial result with links is better than a complete result without them.`;
 
 const TOKEN_LIMIT = 30000;
 
@@ -124,6 +153,7 @@ export class AgentLoop {
   private startedAt = '';
   private toolsUsedSet = new Set<string>();
   private urlsVisited = new Set<string>();
+  private collectedLinks = new Map<string, string>(); // url -> context/title
   private lastScreenshotTime = 0;
   private screenshotInterval = 2000; // minimum ms between screenshots
 
@@ -257,6 +287,12 @@ export class AgentLoop {
       parts.push(`Recent actions:\n${actions.slice(-10).map(a => `  - ${a}`).join('\n')}`);
     }
 
+    // Include collected links count so the LLM knows data is accumulating
+    if (this.collectedLinks.size > 0) {
+      const sampleLinks = [...this.collectedLinks.entries()].slice(-5);
+      parts.push(`Data collected so far: ${this.collectedLinks.size} links tracked. Recent:\n${sampleLinks.map(([url, ctx]) => ctx ? `  - ${ctx}: ${url}` : `  - ${url}`).join('\n')}`);
+    }
+
     if (parts.length === 0) return 'No significant actions taken yet.';
     return `Summary of previous steps:\n${parts.join('\n\n')}`;
   }
@@ -297,6 +333,7 @@ export class AgentLoop {
     this.startedAt = new Date().toISOString();
     this.toolsUsedSet.clear();
     this.urlsVisited.clear();
+    this.collectedLinks.clear();
 
     logger.thought(`Starting task: ${task}`);
     this.eventBus?.emitStatus('running');
@@ -603,6 +640,25 @@ export class AgentLoop {
         await this.captureScreenshot();
       }
 
+      // Extract links from page observations (DOM snapshots contain href attributes)
+      if (observation !== 'Page unchanged from previous observation.' && observation !== 'No page loaded yet. Use goTo(url) to navigate to a website.') {
+        const hrefMatches = observation.matchAll(/href="(https?:\/\/[^"]+)"/g);
+        for (const match of hrefMatches) {
+          const url = match[1];
+          if (url && !url.includes('localhost') && !url.includes('127.0.0.1')) {
+            // Try to find context from nearby text — look for the link text before the href
+            const idx = observation.indexOf(match[0]);
+            const preceding = observation.slice(Math.max(0, idx - 80), idx);
+            const textMatch = preceding.match(/"([^"]{3,60})"\s*$/);
+            if (textMatch?.[1] && !this.collectedLinks.has(url)) {
+              this.collectedLinks.set(url, textMatch[1]);
+            } else if (!this.collectedLinks.has(url)) {
+              this.collectedLinks.set(url, '');
+            }
+          }
+        }
+      }
+
       // Track consecutive unchanged observations
       if (observation === 'Page unchanged from previous observation.') {
         this.consecutiveUnchanged++;
@@ -804,7 +860,7 @@ export class AgentLoop {
         // Check if done/failed
         if (this.actionExecutor.isDone()) {
           this.state.status = 'completed';
-          this.state.result = this.actionExecutor.getResult();
+          this.state.result = this.enrichResult(this.actionExecutor.getResult() ?? '');
           logger.success(`Task completed: ${this.state.result}`);
           this.eventBus?.emitResult(this.state.result ?? '');
           break;
@@ -821,6 +877,19 @@ export class AgentLoop {
       // Capture screenshot after tool execution (skip in MCP mode)
       if (!this.mcpEngine && response.toolCalls.length > 0 && this.state.status === 'running') {
         await this.captureScreenshot();
+      }
+
+      // Extract links from tool results for tracking
+      for (const tr of toolResults) {
+        const urlMatches = tr.matchAll(/https?:\/\/[^\s"',)\]]+/g);
+        for (const match of urlMatches) {
+          const url = match[0].replace(/[.;:]+$/, ''); // trim trailing punctuation
+          if (!url.includes('localhost') && !url.includes('127.0.0.1')) {
+            // Derive context from surrounding text
+            const contextMatch = tr.match(/(?:title|name|heading)["']?:\s*["']?([^"',\n]{3,60})/i);
+            this.collectedLinks.set(url, contextMatch?.[1]?.trim() ?? '');
+          }
+        }
       }
 
       // Add batched tool results as a single user message
@@ -840,11 +909,28 @@ export class AgentLoop {
       this.eventBus?.emitThought('Step budget exhausted — summarizing partial progress...');
 
       try {
+        // Build context about collected links for the summary
+        const linkContext = this.collectedLinks.size > 0
+          ? `\n\nLinks collected during browsing:\n${[...this.collectedLinks.entries()].slice(0, 15).map(([url, ctx]) => ctx ? `- ${ctx}: ${url}` : `- ${url}`).join('\n')}`
+          : '';
+        const urlContext = this.urlsVisited.size > 0
+          ? `\n\nPages visited:\n${[...this.urlsVisited].slice(0, 10).map(u => `- ${u}`).join('\n')}`
+          : '';
+
         const summaryPrompt: LLMMessage = {
           role: 'user',
           content: `You have run out of steps. The task was: "${task}"
 
-Summarize what you accomplished so far and any partial results you gathered. Be concise and factual. Include any URLs, data, or findings you collected. Start with what was accomplished, then note what remains unfinished.`,
+Summarize what you accomplished so far as a USEFUL result for the user. Format your response in markdown.
+
+**Critical requirements:**
+1. Include ALL URLs and links you found — the user needs clickable links
+2. Structure the data clearly (numbered lists, tables, sections)
+3. Include specific details (names, prices, dates, descriptions)
+4. Clearly mark what was completed vs. what remains unfinished
+${urlContext}${linkContext}
+
+Write the result as if the user will never see anything else from this session.`,
         };
 
         const summaryMessages = [
@@ -859,11 +945,11 @@ Summarize what you accomplished so far and any partial results you gathered. Be 
           temperature: 0.1,
         });
 
-        const partialResult = summaryResponse.content || `Max steps (${this.state.maxSteps}) reached without completing the task`;
+        const rawResult = summaryResponse.content || `Max steps (${this.state.maxSteps}) reached without completing the task`;
         this.state.status = 'max-steps';
-        this.state.result = partialResult;
-        logger.thought(`Partial result: ${partialResult.slice(0, 200)}`);
-        this.eventBus?.emitResult(partialResult);
+        this.state.result = this.enrichResult(rawResult);
+        logger.thought(`Partial result: ${this.state.result.slice(0, 200)}`);
+        this.eventBus?.emitResult(this.state.result);
       } catch {
         // If even the summary call fails, fall back to basic message
         this.state.status = 'max-steps';
@@ -911,6 +997,60 @@ Summarize what you accomplished so far and any partial results you gathered. Be 
     }
 
     return this.getState();
+  }
+
+  /**
+   * Enrich the agent's result by appending collected URLs/links
+   * that are missing from the result text.
+   */
+  private enrichResult(result: string): string {
+    if (!result) return result;
+
+    // Collect URLs already present in the result
+    const existingUrls = new Set<string>();
+    const existingMatches = result.matchAll(/https?:\/\/[^\s"',)\]]+/g);
+    for (const m of existingMatches) {
+      existingUrls.add(m[0].replace(/[.;:]+$/, ''));
+    }
+
+    // Find visited URLs not already mentioned in the result
+    const missingLinks: { url: string; context: string }[] = [];
+    for (const url of this.urlsVisited) {
+      // Skip generic/navigation URLs
+      if (url.includes('about:blank') || url.includes('chrome://') || url.includes('data:')) continue;
+      // Check if already in the result (also check without trailing slash)
+      const normalizedUrl = url.replace(/\/$/, '');
+      const alreadyCited = [...existingUrls].some(eu => {
+        const normExisting = eu.replace(/\/$/, '');
+        return normExisting === normalizedUrl || normalizedUrl.startsWith(normExisting) || normExisting.startsWith(normalizedUrl);
+      });
+      if (!alreadyCited) {
+        missingLinks.push({ url, context: this.collectedLinks.get(url) ?? '' });
+      }
+    }
+
+    // Also check collected links from evaluate() results that aren't visited URLs
+    for (const [url, context] of this.collectedLinks) {
+      if (this.urlsVisited.has(url)) continue; // already handled above
+      const normalizedUrl = url.replace(/\/$/, '');
+      const alreadyCited = [...existingUrls].some(eu => {
+        const normExisting = eu.replace(/\/$/, '');
+        return normExisting === normalizedUrl || normalizedUrl.startsWith(normExisting) || normExisting.startsWith(normalizedUrl);
+      });
+      if (!alreadyCited && !missingLinks.some(ml => ml.url === url)) {
+        missingLinks.push({ url, context });
+      }
+    }
+
+    // If there are significant missing links, append them
+    if (missingLinks.length > 0 && missingLinks.length <= 20) {
+      const linksSection = missingLinks.map(({ url, context }) => {
+        return context ? `- ${context}: ${url}` : `- ${url}`;
+      }).join('\n');
+      result += `\n\n---\n**Sources & Links:**\n${linksSection}`;
+    }
+
+    return result;
   }
 
   private async captureScreenshot(): Promise<void> {

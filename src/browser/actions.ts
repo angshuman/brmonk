@@ -643,11 +643,11 @@ export function getBrowserToolDefinitions(): LLMToolDefinition[] {
     },
     {
       name: 'done',
-      description: 'Signal that the task is complete and provide the result. Call this when you have accomplished the user\'s task.',
+      description: 'Signal that the task is complete and provide the final result to the user. Your result string IS the deliverable — it must be comprehensive, structured, and include all URLs/links you encountered. Write it as if the user will never see anything else from this session. Use markdown formatting for readability.',
       parameters: {
         type: 'object',
         properties: {
-          result: { type: 'string', description: 'Description of what was accomplished and any extracted data' },
+          result: { type: 'string', description: 'The complete result in markdown format. Must include: (1) all relevant URLs/links found, (2) structured data in lists or tables, (3) specific details like names, prices, dates, (4) source attribution. This is the only thing the user sees.' },
         },
         required: ['result'],
       },
