@@ -1,4 +1,4 @@
-# brmonk — One-command launcher (Docker mode) for Windows
+# brmonk - One-command launcher (Docker mode) for Windows
 #
 # What this does:
 #   1. Builds the Docker image if needed
@@ -85,13 +85,14 @@ if (-not (Test-Path ".env")) {
         Copy-Item ".env.example" ".env"
         Write-Host "Created .env from .env.example. Please edit it and add at least one API key:" -ForegroundColor Yellow
     } else {
-        @"
-# brmonk — Add at least one API key
-# ANTHROPIC_API_KEY=sk-ant-...
-# OPENAI_API_KEY=sk-...
-# XAI_API_KEY=xai-...
-"@ | Out-File -FilePath ".env" -Encoding utf8
-        Write-Host "Created .env — please add at least one API key and re-run." -ForegroundColor Red
+        $envContent = @(
+            "# brmonk - Add at least one API key",
+            "# ANTHROPIC_API_KEY=sk-ant-...",
+            "# OPENAI_API_KEY=sk-...",
+            "# XAI_API_KEY=xai-..."
+        ) -join "`n"
+        $envContent | Out-File -FilePath ".env" -Encoding utf8
+        Write-Host "Created .env - please add at least one API key and re-run." -ForegroundColor Red
         Pop-Location
         exit 1
     }
@@ -145,7 +146,7 @@ if ($Mode -eq "cdp") {
 }
 
 Write-Host ""
-Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Green
 Write-Host "  brmonk is running!" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Web UI:   http://localhost:$Port" -ForegroundColor White
@@ -158,7 +159,7 @@ if ($Mode -eq "cdp") {
 Write-Host ""
 Write-Host "  Stop:     .\brmonk.ps1 -Stop" -ForegroundColor Gray
 Write-Host "  Logs:     docker compose logs -f" -ForegroundColor Gray
-Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
 
 # Open web UI

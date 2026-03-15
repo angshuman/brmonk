@@ -1,4 +1,4 @@
-# brmonk — Run natively without Docker (Windows)
+# brmonk - Run natively without Docker (Windows)
 #
 # This script runs brmonk directly on your machine with a local browser.
 # No Docker required. Good for development or simpler setups.
@@ -125,11 +125,11 @@ if ($Console) {
 } else {
     Write-Host "Starting brmonk web UI on port $Port..." -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Green
+    Write-Host "========================================" -ForegroundColor Green
     Write-Host "  Web UI:  http://localhost:$Port" -ForegroundColor White
     Write-Host "  Mode:    local (Playwright)" -ForegroundColor White
     Write-Host "  Stop:    Ctrl+C" -ForegroundColor Gray
-    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Green
+    Write-Host "========================================" -ForegroundColor Green
     Write-Host ""
 
     # Open browser
