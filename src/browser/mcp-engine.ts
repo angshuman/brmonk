@@ -47,32 +47,60 @@ export class McpBrowserEngine {
   }
 
   private async initializeRemote(url: string): Promise<void> {
-    const parsed = new URL(url);
+    // Derive both endpoints from the base URL.
+    // User may pass http://host:3100/mcp, http://host:3100/sse, or just http://host:3100
+    const base = url.replace(/\/(mcp|sse)\/?$/, '');
+    const mcpUrl = new URL(`${base}/mcp`);
+    const sseUrl = new URL(`${base}/sse`);
 
-    // Try Streamable HTTP first (modern MCP), fall back to SSE (legacy)
-    this.client = new Client(
-      { name: 'brmonk', version: '1.0.0' },
-      { capabilities: {} },
-    );
+    // Retry loop — the MCP server may not be ready when Docker first boots
+    const maxRetries = 10;
+    const retryDelay = 2000;
+    let lastError: Error | null = null;
 
-    try {
-      logger.info(`Connecting to remote MCP server via Streamable HTTP: ${url}`);
-      const transport = new StreamableHTTPClientTransport(parsed);
-      await this.client.connect(transport);
-      this.transport = transport;
-      logger.info('Connected via Streamable HTTP transport');
-    } catch {
-      // Streamable HTTP failed — try SSE fallback
-      logger.info('Streamable HTTP failed, trying SSE transport...');
-      this.client = new Client(
-        { name: 'brmonk', version: '1.0.0' },
-        { capabilities: {} },
-      );
-      const sseTransport = new SSEClientTransport(parsed);
-      await this.client.connect(sseTransport);
-      this.transport = sseTransport;
-      logger.info('Connected via SSE transport');
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      // Try Streamable HTTP first (modern MCP /mcp endpoint)
+      try {
+        this.client = new Client(
+          { name: 'brmonk', version: '1.0.0' },
+          { capabilities: {} },
+        );
+        logger.info(`Connecting to remote MCP server via Streamable HTTP: ${mcpUrl} (attempt ${attempt}/${maxRetries})`);
+        const transport = new StreamableHTTPClientTransport(mcpUrl);
+        await this.client.connect(transport);
+        this.transport = transport;
+        logger.info('Connected via Streamable HTTP transport');
+        return;
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        logger.info(`Streamable HTTP failed (${errMsg}), trying SSE transport at ${sseUrl}...`);
+      }
+
+      // Streamable HTTP failed — try SSE fallback at /sse
+      try {
+        this.client = new Client(
+          { name: 'brmonk', version: '1.0.0' },
+          { capabilities: {} },
+        );
+        const sseTransport = new SSEClientTransport(sseUrl);
+        await this.client.connect(sseTransport);
+        this.transport = sseTransport;
+        logger.info('Connected via SSE transport');
+        return;
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        if (attempt < maxRetries) {
+          logger.info(`MCP server not ready (${lastError.message}), retrying in ${retryDelay / 1000}s... (attempt ${attempt}/${maxRetries})`);
+          await new Promise(r => setTimeout(r, retryDelay));
+        }
+      }
     }
+
+    throw new Error(
+      `Could not connect to remote MCP server at ${base} after ${maxRetries} attempts. ` +
+      `Last error: ${lastError?.message}. ` +
+      `Make sure the Playwright MCP server is running with --host 0.0.0.0`
+    );
   }
 
   private async initializeLocal(): Promise<void> {

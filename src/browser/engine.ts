@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as fs from 'node:fs/promises';
 import type { AgentEventBus } from '../events.js';
 import { randomDelay } from '../utils/helpers.js';
+import { logger } from '../utils/logger.js';
 
 export class BrowserEngine {
   private browser: Browser | null = null;
@@ -28,10 +29,63 @@ export class BrowserEngine {
     this.eventBus = bus;
   }
 
+  /**
+   * Resolve a CDP HTTP endpoint to a WebSocket URL.
+   * Chrome's /json/version returns a webSocketDebuggerUrl with the local
+   * hostname (127.0.0.1 or 0.0.0.0), which is unreachable from Docker.
+   * We rewrite the hostname to match the original endpoint URL.
+   */
+  private async resolveCdpWsUrl(httpUrl: string): Promise<string> {
+    const endpoint = new URL(httpUrl);
+    const versionUrl = `${endpoint.origin}/json/version`;
+
+    // Retry a few times — Chrome may still be starting when Docker boots
+    const maxRetries = 10;
+    const retryDelay = 2000;
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        logger.info(`Fetching CDP debug info from ${versionUrl} (attempt ${attempt}/${maxRetries})`);
+        const res = await fetch(versionUrl);
+        if (!res.ok) {
+          throw new Error(`CDP /json/version returned ${res.status}: ${res.statusText}`);
+        }
+        const json = await res.json() as { webSocketDebuggerUrl?: string };
+        const wsUrl = json.webSocketDebuggerUrl;
+        if (!wsUrl) {
+          throw new Error('CDP /json/version did not return webSocketDebuggerUrl');
+        }
+
+        // Rewrite hostname/port to match the original endpoint so it works from Docker
+        const wsUrlParsed = new URL(wsUrl);
+        wsUrlParsed.hostname = endpoint.hostname;
+        wsUrlParsed.port = endpoint.port;
+        const resolved = wsUrlParsed.toString();
+        logger.info(`Resolved CDP WebSocket URL: ${resolved}`);
+        return resolved;
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        if (attempt < maxRetries) {
+          logger.info(`CDP not ready (${lastError.message}), retrying in ${retryDelay / 1000}s...`);
+          await new Promise(r => setTimeout(r, retryDelay));
+        }
+      }
+    }
+
+    throw new Error(
+      `Could not connect to Chrome CDP at ${httpUrl} after ${maxRetries} attempts. ` +
+      `Last error: ${lastError?.message}. ` +
+      `Make sure Chrome is running with --remote-debugging-port and --remote-debugging-address=0.0.0.0`
+    );
+  }
+
   async launch(): Promise<void> {
     // Remote CDP mode: connect to an existing browser on the host
     if (this.cdpUrl) {
-      this.browser = await chromium.connectOverCDP(this.cdpUrl);
+      // Resolve the WS URL ourselves so we can fix the hostname for Docker
+      const wsUrl = await this.resolveCdpWsUrl(this.cdpUrl);
+      this.browser = await chromium.connectOverCDP(wsUrl);
       const contexts = this.browser.contexts();
       this.context = contexts[0] ?? await this.browser.newContext();
       const existingPages = this.context.pages();
