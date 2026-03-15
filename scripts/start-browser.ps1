@@ -39,7 +39,7 @@ if (-not $Chrome) {
 }
 
 Write-Host "Found browser: $Chrome" -ForegroundColor Green
-Write-Host "Remote debugging URL: http://localhost:$Port" -ForegroundColor Green
+Write-Host "Remote debugging URL: http://localhost:$Port (listening on all interfaces)" -ForegroundColor Green
 Write-Host ""
 Write-Host "Close the browser window or press Ctrl+C to stop." -ForegroundColor Yellow
 Write-Host ""
@@ -51,6 +51,7 @@ New-Item -ItemType Directory -Path $TempDataDir -Force | Out-Null
 try {
     & $Chrome `
         "--remote-debugging-port=$Port" `
+        "--remote-debugging-address=0.0.0.0" `
         "--user-data-dir=$TempDataDir" `
         "--no-first-run" `
         "--no-default-browser-check" `

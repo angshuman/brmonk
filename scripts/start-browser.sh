@@ -90,7 +90,7 @@ if [ -z "$CHROME" ]; then
 fi
 
 echo "Browser: $CHROME"
-echo "CDP URL: http://localhost:$PORT"
+echo "CDP URL: http://localhost:$PORT (listening on all interfaces)"
 if $IS_WSL; then
     echo "Mode:    WSL → Windows Chrome"
 fi
@@ -106,7 +106,7 @@ if $IS_WSL; then
     # Convert WSL path to Windows path for the chrome executable
     WIN_CHROME=$(wslpath -w "$CHROME")
     
-    cmd.exe /C "\"$WIN_CHROME\" --remote-debugging-port=$PORT --user-data-dir=\"$WIN_DATA_DIR\" --no-first-run --no-default-browser-check --disable-background-networking --disable-sync --window-size=1280,720 about:blank" 2>/dev/null
+    cmd.exe /C "\"$WIN_CHROME\" --remote-debugging-port=$PORT --remote-debugging-address=0.0.0.0 --user-data-dir=\"$WIN_DATA_DIR\" --no-first-run --no-default-browser-check --disable-background-networking --disable-sync --window-size=1280,720 about:blank" 2>/dev/null
     
     # Cleanup
     cmd.exe /C "rmdir /S /Q \"$WIN_DATA_DIR\"" 2>/dev/null || true
@@ -117,6 +117,7 @@ else
 
     "$CHROME" \
         --remote-debugging-port="$PORT" \
+        --remote-debugging-address=0.0.0.0 \
         --user-data-dir="$TEMP_DATA_DIR" \
         --no-first-run \
         --no-default-browser-check \
