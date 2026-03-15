@@ -94,7 +94,8 @@ export async function startWebServer(port: number): Promise<void> {
   // Serve static frontend in production
   const webDistPath = path.resolve(__dirname, '../../web/dist');
   app.use(express.static(webDistPath));
-  app.get('*', (_req, res) => {
+  // Catch-all for SPA client-side routing (Express 5 requires named wildcard)
+  app.get('{*path}', (_req, res) => {
     res.sendFile(path.join(webDistPath, 'index.html'));
   });
 
