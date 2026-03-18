@@ -1,4 +1,5 @@
 import * as crypto from 'node:crypto';
+import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import type { LLMProvider, LLMMessage, LLMToolDefinition } from '../llm/types.js';
@@ -156,6 +157,10 @@ export class AgentLoop {
   private collectedLinks = new Map<string, string>(); // url -> context/title
   private lastScreenshotTime = 0;
   private screenshotInterval = 2000; // minimum ms between screenshots
+  private lastFileSaveTime = 0;
+  private fileSaveInterval = 5000; // 5 seconds between file saves
+  private filesDir: string | null = null;
+  private currentTools: LLMToolDefinition[] = [];
 
   constructor(options: {
     llm: LLMProvider;
@@ -165,6 +170,7 @@ export class AgentLoop {
     memory?: MemoryStore;
     eventBus?: AgentEventBus;
     maxSteps?: number;
+    filesDir?: string;
   }) {
     this.llm = options.llm;
     this.browser = options.browser;
@@ -177,6 +183,7 @@ export class AgentLoop {
       : null;
     this.memory = options.memory ?? null;
     this.eventBus = options.eventBus ?? null;
+    this.filesDir = options.filesDir ?? null;
     this.state = {
       taskDescription: '',
       currentUrl: '',
@@ -496,6 +503,38 @@ export class AgentLoop {
       );
     }
     const allTools = [...browserTools, ...skillTools, ...memoryTools];
+    this.currentTools = allTools;
+
+    return this.runLoop();
+  }
+
+  /** Continue a finished session with a follow-up message, preserving conversation history. */
+  async continueWith(followUp: string): Promise<AgentState> {
+    const previousMessages = [...this.messages];
+
+    this.state.status = 'running';
+    this.state.result = null;
+    this.state.stepCount = 0;
+    this.paused = false;
+    this.lastObservationHash = '';
+    this.pendingMessages = [];
+    this.consecutiveUnchanged = 0;
+    this.actionExecutor.resetStatus();
+    this.startedAt = new Date().toISOString();
+
+    this.messages = previousMessages;
+    this.messages.push({ role: 'user', content: `Follow-up from user: ${followUp}` });
+
+    logger.thought(`Continuing with follow-up: ${followUp}`);
+    this.eventBus?.emitStatus('running');
+    this.eventBus?.emitThought(`Continuing with follow-up: ${followUp}`);
+
+    return this.runLoop();
+  }
+
+  private async runLoop(): Promise<AgentState> {
+    const allTools = this.currentTools;
+    const task = this.state.taskDescription;
 
     // Main agent loop
     while (this.state.stepCount < this.state.maxSteps && this.state.status === 'running') {
@@ -633,11 +672,6 @@ export class AgentLoop {
         } catch {
           observation = 'No page loaded yet. Use goTo(url) to navigate to a website.';
         }
-      }
-
-      // Capture screenshot after observing page state (skip in MCP mode — no direct browser access)
-      if (!this.mcpEngine) {
-        await this.captureScreenshot();
       }
 
       // Extract links from page observations (DOM snapshots contain href attributes)
@@ -840,6 +874,24 @@ export class AgentLoop {
             const actionResult = await this.actionExecutor.execute(toolCall.name, toolCall.arguments as Record<string, unknown>);
             result = actionResult.message;
             logger.action(`${toolCall.name}: ${result}`);
+
+            // On explicit screenshot() call, emit to viewport and save to Files pane
+            if (toolCall.name === 'screenshot') {
+              const now = Date.now();
+              let snapData: string | null = null;
+              let snapUrl = '';
+              if (this.mcpEngine) {
+                snapData = await this.mcpEngine.screenshotToBase64().catch(() => null);
+                if (snapData) snapUrl = await this.mcpEngine.getCurrentUrl().catch(() => '');
+              } else {
+                snapData = await this.browser.screenshotToBase64().catch(() => null);
+                if (snapData) snapUrl = this.browser.getCurrentUrl();
+              }
+              if (snapData) {
+                this.eventBus?.emitBrowserScreenshot(snapData, snapUrl);
+                if (this.filesDir) await this.saveScreenshotFile(snapData, snapUrl, now);
+              }
+            }
           }
         }
         } // end of memory-tool else block
@@ -863,6 +915,19 @@ export class AgentLoop {
           this.state.result = this.enrichResult(this.actionExecutor.getResult() ?? '');
           logger.success(`Task completed: ${this.state.result}`);
           this.eventBus?.emitResult(this.state.result ?? '');
+          // Save final screenshot to Files pane only if task mentions screenshot
+          if (/screenshot/i.test(this.state.taskDescription)) {
+            let finalData: string | null = null;
+            let finalUrl = '';
+            if (this.mcpEngine) {
+              finalData = await this.mcpEngine.screenshotToBase64().catch(() => null);
+              if (finalData) finalUrl = await this.mcpEngine.getCurrentUrl().catch(() => '');
+            } else {
+              finalData = await this.browser.screenshotToBase64().catch(() => null);
+              if (finalData) finalUrl = this.browser.getCurrentUrl();
+            }
+            if (finalData) await this.saveScreenshotFile(finalData, finalUrl, Date.now());
+          }
           break;
         }
         if (this.actionExecutor.isFailed()) {
@@ -874,10 +939,6 @@ export class AgentLoop {
         }
       }
 
-      // Capture screenshot after tool execution (skip in MCP mode)
-      if (!this.mcpEngine && response.toolCalls.length > 0 && this.state.status === 'running') {
-        await this.captureScreenshot();
-      }
 
       // Extract links from tool results for tracking
       for (const tr of toolResults) {
@@ -1060,11 +1121,47 @@ Write the result as if the user will never see anything else from this session.`
     this.lastScreenshotTime = now;
 
     try {
-      const data = await this.browser.screenshotToBase64();
-      if (data) {
-        const url = this.browser.getCurrentUrl();
-        this.eventBus.emitBrowserScreenshot(data, url);
+      let data: string | null = null;
+      let pageUrl = '';
+
+      if (this.mcpEngine) {
+        // MCP mode: capture via MCP screenshot tool
+        data = await this.mcpEngine.screenshotToBase64();
+        if (data) pageUrl = await this.mcpEngine.getCurrentUrl();
+      } else {
+        // Direct Playwright mode
+        data = await this.browser.screenshotToBase64();
+        if (data) pageUrl = this.browser.getCurrentUrl();
       }
+
+      if (data) {
+        this.eventBus.emitBrowserScreenshot(data, pageUrl);
+
+        // Save to file at lower frequency for the Files pane
+        if (this.filesDir && now - this.lastFileSaveTime >= this.fileSaveInterval) {
+          await this.saveScreenshotFile(data, pageUrl, now);
+        }
+      }
+    } catch {
+      // Non-critical
+    }
+  }
+
+  private async saveScreenshotFile(data: string, pageUrl = '', now: number = Date.now()): Promise<void> {
+    if (!this.filesDir || !this.eventBus) return;
+    this.lastFileSaveTime = now;
+    const sessionId = this.eventBus.getSessionId();
+    const sessionFilesDir = path.join(this.filesDir, sessionId);
+    const fileId = `screenshot-${now}`;
+    const filename = `${fileId}.jpg`;
+    const filePath = path.join(sessionFilesDir, filename);
+    const fileUrl = `/files/${sessionId}/${filename}`;
+    try {
+      await fs.mkdir(sessionFilesDir, { recursive: true });
+      await fs.writeFile(filePath, Buffer.from(data, 'base64'));
+      const stat = await fs.stat(filePath);
+      this.eventBus.emitFileCreated(fileId, filename, 'image/jpeg', fileUrl, data, stat.size);
+      logger.info(`Screenshot saved: ${filePath}`);
     } catch {
       // Non-critical
     }
